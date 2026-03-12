@@ -34,7 +34,14 @@ pip install -r requirements.txt
 
 ### Environment Variables
 
-Create a `.env` file in the repo root or export these variables in your shell:
+Copy `.env.example` to `.env`, fill in only the values you need, and restrict the file permissions:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+```
+
+You can also export these variables in your shell instead of using a `.env` file:
 
 ```bash
 export KITE_API_KEY="your_kite_api_key"
@@ -50,7 +57,7 @@ export TWILIO_WHATSAPP_FROM="whatsapp:+1415xxxxxxx"
 export WHATSAPP_TO="whatsapp:+91xxxxxxxxxx"
 ```
 
-The application uses `pydantic` settings, so you can also configure values in `config/settings.py` or via env vars.
+The application uses `pydantic` settings and reads secrets from environment variables or `.env`. Do not hardcode secrets in `config/settings.py` or commit them to the repository.
 
 `KITE_INSTRUMENT_TOKEN` is optional. If omitted, the app will try to resolve the NIFTY index instrument token from Zerodha instruments metadata at runtime. For production, setting it explicitly is safer and avoids a symbol-lookup dependency during market hours.
 
@@ -69,6 +76,14 @@ Before relying on the app in live market hours, make sure:
 - `KITE_INSTRUMENT_TOKEN` is correct for the instrument you want to analyze, if you set it manually
 
 For NIFTY 50, `256265` is the common NSE index instrument token, but you should still verify it against your Zerodha account/instruments dump before treating it as fixed infrastructure.
+
+### Local Security Notes
+
+- Keep `.env` local only. It is git-ignored and should never be committed.
+- Prefer short-lived credentials where possible, especially `KITE_ACCESS_TOKEN`.
+- Treat Twilio credentials, OpenAI keys, News API keys, and broker tokens as secrets even on a local machine.
+- Avoid pasting secrets into notebooks, screenshots, shell history, or logs.
+- Restart the app after rotating credentials because API clients are created at process startup.
 
 ### Running the System
 

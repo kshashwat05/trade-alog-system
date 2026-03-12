@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 
 import pandas as pd
@@ -12,7 +13,11 @@ from ai_trader.agents.volatility_agent import VolatilityAgent, VolatilityAnalysi
 from ai_trader.agents.regime_agent import RegimeAgent, RegimeAnalysis
 from ai_trader.agents.liquidity_agent import LiquidityAgent, LiquidityAnalysis
 from ai_trader.agents.trigger_agent import TradeTriggerAgent, TradeSignal
+from ai_trader.agents.fii_positioning_agent import FiiPositioningAnalysis
+from ai_trader.agents.gamma_agent import GammaAnalysis
+from ai_trader.agents.liquidity_sweep_agent import LiquiditySweepAnalysis
 from ai_trader.agents.risk_agent import RiskManagerAgent, RiskCheckResult
+from ai_trader.data.market_data_context import MarketDataQuality
 from ai_trader.orchestrator.decision_engine import DecisionEngine, OrchestratorOutput
 from ai_trader.main import is_market_open
 
@@ -94,7 +99,23 @@ def test_trigger_and_risk_and_orchestrator_integration():
     news = NewsMacroAnalysis(macro_bias="bearish", risk_level="high")
     vol = VolatilityAnalysis(volatility="medium", expected_range=(23800, 24200))
     regime = RegimeAnalysis(regime="trend_down", confidence=0.9)
-    liq = LiquidityAnalysis(liquidity="medium", slippage_risk="medium")
+    liq = LiquidityAnalysis(liquidity="high", slippage_risk="low")
+    fii = FiiPositioningAnalysis(
+        fii_bias="bearish",
+        institutional_support=23600,
+        institutional_resistance=23800,
+        confidence=0.8,
+    )
+    gamma = GammaAnalysis(
+        gamma_regime="negative_gamma",
+        gamma_flip_level=23700,
+        expected_move="expansion",
+    )
+    liquidity_sweep = LiquiditySweepAnalysis(
+        liquidity_event=False,
+        event_type="none",
+        confidence=0.8,
+    )
 
     trigger = TradeTriggerAgent()
     signal = trigger.generate_signal(
@@ -104,7 +125,27 @@ def test_trigger_and_risk_and_orchestrator_integration():
         vol=vol,
         regime=regime,
         liquidity=liq,
+        fii=fii,
+        gamma=gamma,
+        liquidity_sweep=liquidity_sweep,
         spot=24000,
+        market_context=type(
+            "Ctx",
+            (),
+            {
+                "option_chain_raw": {
+                    "records": {
+                        "data": [
+                            {
+                                "strikePrice": 24000,
+                                "PE": {"lastPrice": 210.0, "identifier": "NIFTY24MAR24000PE"},
+                                "CE": {"lastPrice": 190.0, "identifier": "NIFTY24MAR24000CE"},
+                            }
+                        ]
+                    }
+                }
+            },
+        )(),
     )
     assert isinstance(signal, TradeSignal)
     assert signal.signal in ("BUY_PE", "BUY_CE", "NONE")
@@ -116,12 +157,46 @@ def test_trigger_and_risk_and_orchestrator_integration():
 
     # Orchestrator smoke test
     engine = DecisionEngine()
-    engine.chart_agent.analyze = lambda: chart  # type: ignore[method-assign]
-    engine.option_agent.analyze = lambda: option_chain  # type: ignore[method-assign]
+    engine.market_data_provider.build = lambda: type(  # type: ignore[method-assign]
+        "Ctx",
+        (),
+        {
+            "spot_price": 24000,
+            "option_chain_raw": {
+                "records": {
+                    "data": [
+                        {
+                            "strikePrice": 24000,
+                            "PE": {"lastPrice": 210.0, "identifier": "NIFTY24MAR24000PE"},
+                            "CE": {"lastPrice": 190.0, "identifier": "NIFTY24MAR24000CE"},
+                        }
+                    ]
+                }
+            },
+            "quality": MarketDataQuality(
+                price_data_available=True,
+                option_chain_available=True,
+                vix_available=True,
+                fii_data_available=True,
+                price_fresh=True,
+                option_chain_fresh=True,
+                vix_fresh=True,
+                used_price_fallback=False,
+                used_option_chain_fallback=False,
+                used_vix_fallback=False,
+                issues=[],
+            ),
+        },
+    )()
+    engine.chart_agent.analyze = lambda context=None: chart  # type: ignore[method-assign]
+    engine.option_agent.analyze = lambda context=None: option_chain  # type: ignore[method-assign]
     engine.news_agent.analyze = lambda: news  # type: ignore[method-assign]
-    engine.vol_agent.analyze = lambda: vol  # type: ignore[method-assign]
-    engine.regime_agent.analyze = lambda: regime  # type: ignore[method-assign]
-    engine.liquidity_agent.analyze = lambda: liq  # type: ignore[method-assign]
+    engine.vol_agent.analyze = lambda spot=None, context=None: vol  # type: ignore[method-assign]
+    engine.regime_agent.analyze = lambda context=None: regime  # type: ignore[method-assign]
+    engine.liquidity_agent.analyze = lambda avg_spread=None, volume_score=None, context=None: liq  # type: ignore[method-assign]
+    engine.fii_agent.analyze = lambda context: fii  # type: ignore[method-assign]
+    engine.gamma_agent.analyze = lambda context: gamma  # type: ignore[method-assign]
+    engine.liquidity_sweep_agent.analyze = lambda context: liquidity_sweep  # type: ignore[method-assign]
     out = engine.run_once()
     assert isinstance(out, OrchestratorOutput)
     assert isinstance(out.decision_score, int)
@@ -164,6 +239,26 @@ def test_risk_manager_enforces_cooldown():
     assert check.reason is not None
 
 
+def test_risk_manager_authorize_signal_is_atomic():
+    risk = RiskManagerAgent()
+    signal = TradeSignal(
+        signal="BUY_CE",
+        entry=100.0,
+        stop_loss=80.0,
+        target=140.0,
+        confidence=0.9,
+        rationale="test",
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(risk.authorize_signal, signal) for _ in range(2)]
+        results = [future.result() for future in futures]
+
+    allowed_count = sum(1 for result in results if result.allowed)
+    assert allowed_count == 1
+    assert any(result.reason and "cooldown" in result.reason.lower() for result in results if not result.allowed)
+
+
 def test_is_market_open_uses_configured_market_window():
     inside = datetime(2026, 3, 12, 10, 0)
     outside = datetime(2026, 3, 12, 16, 0)
@@ -183,10 +278,153 @@ def test_trigger_blocks_conflicting_news():
         vol=VolatilityAnalysis(volatility="medium", expected_range=(23800, 24200)),
         regime=RegimeAnalysis(regime="trend_up", confidence=0.9),
         liquidity=LiquidityAnalysis(liquidity="high", slippage_risk="low"),
+        fii=FiiPositioningAnalysis("bullish", 23600, 23800, 0.8),
+        gamma=GammaAnalysis("negative_gamma", 23700, "expansion"),
+        liquidity_sweep=LiquiditySweepAnalysis(False, "none", 0.8),
         spot=24000,
+        market_context=type(
+            "Ctx",
+            (),
+            {
+                "option_chain_raw": {
+                    "records": {
+                        "data": [
+                            {
+                                "strikePrice": 24000,
+                                "PE": {"lastPrice": 210.0, "identifier": "NIFTY24MAR24000PE"},
+                                "CE": {"lastPrice": 190.0, "identifier": "NIFTY24MAR24000CE"},
+                            }
+                        ]
+                    }
+                }
+            },
+        )(),
     )
     assert signal.signal == "NONE"
     assert "conflicts" in signal.rationale
+
+
+def test_decision_engine_masks_signal_when_risk_rejects():
+    chart = ChartAnalysis(trend="bearish", structure="breakout", confidence=0.8)
+    option_chain = OptionChainAnalysis(
+        support=23000, resistance=24000, pcr=0.8, bias="bearish"
+    )
+    news = NewsMacroAnalysis(macro_bias="bearish", risk_level="high")
+    vol = VolatilityAnalysis(volatility="medium", expected_range=(23800, 24200))
+    regime = RegimeAnalysis(regime="trend_down", confidence=0.9)
+    liq = LiquidityAnalysis(liquidity="high", slippage_risk="low")
+    fii = FiiPositioningAnalysis("bearish", 23600, 23800, 0.8)
+    gamma = GammaAnalysis("negative_gamma", 23700, "expansion")
+    liquidity_sweep = LiquiditySweepAnalysis(False, "none", 0.8)
+
+    engine = DecisionEngine()
+    engine.market_data_provider.build = lambda: type(  # type: ignore[method-assign]
+        "Ctx",
+        (),
+        {
+            "spot_price": 24000,
+            "option_chain_raw": {
+                "records": {
+                    "data": [
+                        {
+                            "strikePrice": 24000,
+                            "PE": {"lastPrice": 210.0, "identifier": "NIFTY24MAR24000PE"},
+                            "CE": {"lastPrice": 190.0, "identifier": "NIFTY24MAR24000CE"},
+                        }
+                    ]
+                }
+            },
+            "quality": MarketDataQuality(
+                price_data_available=True,
+                option_chain_available=True,
+                vix_available=True,
+                fii_data_available=True,
+                price_fresh=True,
+                option_chain_fresh=True,
+                vix_fresh=True,
+                used_price_fallback=False,
+                used_option_chain_fallback=False,
+                used_vix_fallback=False,
+                issues=[],
+            ),
+        },
+    )()
+    engine.chart_agent.analyze = lambda context=None: chart  # type: ignore[method-assign]
+    engine.option_agent.analyze = lambda context=None: option_chain  # type: ignore[method-assign]
+    engine.news_agent.analyze = lambda: news  # type: ignore[method-assign]
+    engine.vol_agent.analyze = lambda spot=None, context=None: vol  # type: ignore[method-assign]
+    engine.regime_agent.analyze = lambda context=None: regime  # type: ignore[method-assign]
+    engine.liquidity_agent.analyze = lambda avg_spread=None, volume_score=None, context=None: liq  # type: ignore[method-assign]
+    engine.fii_agent.analyze = lambda context: fii  # type: ignore[method-assign]
+    engine.gamma_agent.analyze = lambda context: gamma  # type: ignore[method-assign]
+    engine.liquidity_sweep_agent.analyze = lambda context: liquidity_sweep  # type: ignore[method-assign]
+
+    out = engine.run_once()
+    assert out.signal.signal == "NONE"
+    assert out.risk.allowed is False
+    assert out.risk.reason == "News risk too high."
+
+
+def test_decision_engine_defaults_to_deterministic_signal_on_llm_failure():
+    chart = ChartAnalysis(trend="bearish", structure="breakout", confidence=0.8)
+    option_chain = OptionChainAnalysis(
+        support=23000, resistance=24000, pcr=0.8, bias="bearish"
+    )
+    news = NewsMacroAnalysis(macro_bias="bearish", risk_level="medium")
+    vol = VolatilityAnalysis(volatility="medium", expected_range=(23800, 24200))
+    regime = RegimeAnalysis(regime="trend_down", confidence=0.9)
+    liq = LiquidityAnalysis(liquidity="high", slippage_risk="low")
+    fii = FiiPositioningAnalysis("bearish", 23600, 23800, 0.8)
+    gamma = GammaAnalysis("negative_gamma", 23700, "expansion")
+    liquidity_sweep = LiquiditySweepAnalysis(False, "none", 0.8)
+
+    engine = DecisionEngine()
+    engine.market_data_provider.build = lambda: type(  # type: ignore[method-assign]
+        "Ctx",
+        (),
+        {
+            "spot_price": 24000,
+            "option_chain_raw": {
+                "records": {
+                    "data": [
+                        {
+                            "strikePrice": 24000,
+                            "PE": {"lastPrice": 210.0, "identifier": "NIFTY24MAR24000PE"},
+                            "CE": {"lastPrice": 190.0, "identifier": "NIFTY24MAR24000CE"},
+                        }
+                    ]
+                }
+            },
+            "quality": MarketDataQuality(
+                price_data_available=True,
+                option_chain_available=True,
+                vix_available=True,
+                fii_data_available=True,
+                price_fresh=True,
+                option_chain_fresh=True,
+                vix_fresh=True,
+                used_price_fallback=False,
+                used_option_chain_fallback=False,
+                used_vix_fallback=False,
+                issues=[],
+            ),
+        },
+    )()
+    engine.chart_agent.analyze = lambda context=None: chart  # type: ignore[method-assign]
+    engine.option_agent.analyze = lambda context=None: option_chain  # type: ignore[method-assign]
+    engine.news_agent.analyze = lambda: news  # type: ignore[method-assign]
+    engine.vol_agent.analyze = lambda spot=None, context=None: vol  # type: ignore[method-assign]
+    engine.regime_agent.analyze = lambda context=None: regime  # type: ignore[method-assign]
+    engine.liquidity_agent.analyze = lambda avg_spread=None, volume_score=None, context=None: liq  # type: ignore[method-assign]
+    engine.fii_agent.analyze = lambda context: fii  # type: ignore[method-assign]
+    engine.gamma_agent.analyze = lambda context: gamma  # type: ignore[method-assign]
+    engine.liquidity_sweep_agent.analyze = lambda context: liquidity_sweep  # type: ignore[method-assign]
+    engine.llm_validator.validate = lambda payload: (_ for _ in ()).throw(RuntimeError("llm timeout"))  # type: ignore[method-assign]
+
+    out = engine.run_once()
+    assert out.signal.signal == "BUY_PE"
+    assert out.risk.allowed is True
+    assert out.llm_validation.fallback_used is True
 
 
 def test_strategy_rejects_missing_columns():

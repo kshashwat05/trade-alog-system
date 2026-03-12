@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Tuple
+from typing import TYPE_CHECKING, Literal, Tuple
 
 import requests
 from loguru import logger
 
 from ai_trader.data.nse_session import build_nse_session, prime_nse_session
+if TYPE_CHECKING:
+    from ai_trader.data.market_data_context import MarketDataContext
 
 VolBucket = Literal["low", "medium", "high"]
 
@@ -15,6 +17,8 @@ VolBucket = Literal["low", "medium", "high"]
 class VolatilityAnalysis:
     volatility: VolBucket
     expected_range: Tuple[float, float]
+    data_available: bool = True
+    fallback_used: bool = False
 
 
 class VolatilityAgent:
@@ -32,7 +36,7 @@ class VolatilityAgent:
         prime_nse_session(self.session)
         self._session_primed = True
 
-    def _fetch_vix(self) -> float | None:
+    def fetch_vix(self) -> float | None:
         try:
             self._prime_session()
             resp = self.session.get(self.INDIA_VIX_URL, timeout=5)
@@ -44,11 +48,20 @@ class VolatilityAgent:
             logger.error(f"Failed to fetch India VIX: {exc}")
             return None
 
-    def analyze(self, spot: float | None = None) -> VolatilityAnalysis:
-        vix = self._fetch_vix()
+    def analyze(
+        self,
+        spot: float | None = None,
+        context: MarketDataContext | None = None,
+    ) -> VolatilityAnalysis:
+        vix = context.vix_value if context is not None else self.fetch_vix()
         if vix is None:
             logger.warning("No VIX data; assuming medium volatility and +/- 1% range.")
             vix = 14.0
+            data_available = False
+            fallback_used = True
+        else:
+            data_available = True
+            fallback_used = False
 
         if vix < 12:
             bucket: VolBucket = "low"
@@ -59,13 +72,18 @@ class VolatilityAgent:
 
         # Convert annualized VIX to rough intraday range; very approximate.
         if spot is None:
-            spot = 24000.0
+            spot = context.spot_price if context is not None else 24000.0
 
         daily_vol = (vix / 100.0) / (252 ** 0.5)
         expected_move = spot * daily_vol
         lower = spot - expected_move
         upper = spot + expected_move
 
-        analysis = VolatilityAnalysis(volatility=bucket, expected_range=(lower, upper))
+        analysis = VolatilityAnalysis(
+            volatility=bucket,
+            expected_range=(lower, upper),
+            data_available=data_available,
+            fallback_used=fallback_used,
+        )
         logger.info(f"VolatilityAgent analysis: {analysis}")
         return analysis

@@ -17,4 +17,5 @@ twilio
 fastapi
 uvicorn
 httpx
+openai
 PyYAML==6.0.3

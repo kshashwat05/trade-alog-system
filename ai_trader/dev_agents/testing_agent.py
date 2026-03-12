@@ -103,3 +103,12 @@ class TestingAgent:
             coverage_summary=coverage_summary,
             output=output,
         )
+
+    def recommended_test_targets(self) -> list[str]:
+        return [
+            "institutional positioning calculations",
+            "gamma regime estimation",
+            "liquidity sweep detection",
+            "LLM validation fallback logic",
+            "dashboard API endpoints",
+        ]

@@ -1,0 +1,16 @@
+{
+  "summary": {
+    "replay_date": "2026-03-10",
+    "minute_count": 121,
+    "evaluated_cycles": 121,
+    "signals_generated": 0,
+    "correct_signals": 0,
+    "wrong_signals": 0,
+    "target_hits": 0,
+    "stop_loss_hits": 0,
+    "expired_signals": 0,
+    "signal_accuracy": 0.0,
+    "total_pnl": 0
+  },
+  "signals": []
+}

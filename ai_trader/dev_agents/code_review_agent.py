@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sqlite3
 from dataclasses import dataclass
@@ -59,6 +60,7 @@ class CodeReviewAgent:
                 cwd=str(self.project_root),
                 capture_output=True,
                 text=True,
+                env={**os.environ, "PYTHONPYCACHEPREFIX": "/tmp/codex_pycache"},
             )
             if proc.returncode != 0:
                 issues.append("Bytecode compilation failed for ai_trader.")
@@ -83,10 +85,17 @@ class CodeReviewAgent:
         risk_source = (self.project_root / "ai_trader/agents/risk_agent.py").read_text()
         if "signal_cooldown_minutes" not in risk_source:
             issues.append("Risk agent does not appear to enforce signal cooldowns.")
+        if "max_open_trades" not in risk_source:
+            issues.append("Risk agent does not appear to enforce max_open_trades.")
 
         http_source = (self.project_root / "ai_trader/data/http_client.py").read_text()
         if "Retry(" not in http_source:
             issues.append("HTTP client retries are not configured.")
+
+        orchestrator_source = (self.project_root / "ai_trader/orchestrator/decision_engine.py").read_text()
+        for required in ("FiiPositioningAgent", "GammaAgent", "LiquiditySweepAgent", "LlmValidatorAgent"):
+            if required not in orchestrator_source:
+                issues.append(f"Decision engine is missing {required} integration.")
 
         main_source = (self.project_root / "ai_trader/main.py").read_text()
         if "trading_engine.log" not in main_source:

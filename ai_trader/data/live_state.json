@@ -1,0 +1,244 @@
+{
+  "timestamp": "2026-03-12T19:35:57.922000",
+  "decision_score": 0,
+  "signal": {
+    "signal": "NONE",
+    "entry": 24000.0,
+    "stop_loss": 24000.0,
+    "target": 24000.0,
+    "confidence": 0.0,
+    "rationale": "Critical market data incomplete; refusing to score a trade.",
+    "underlying_spot": 24000.0,
+    "option_strike": null,
+    "option_expiry": null,
+    "instrument_symbol": null,
+    "instrument_key": null,
+    "price_source": "unknown",
+    "data_complete": false
+  },
+  "risk": {
+    "allowed": false,
+    "reason": "No trade signal after validation."
+  },
+  "llm_validation": {
+    "validation": "rejected",
+    "confidence_adjustment": 0.0,
+    "reasoning": "No deterministic trade to validate.",
+    "source": "deterministic",
+    "fallback_used": false
+  },
+  "state": {
+    "open_trades": 0,
+    "market_context": {
+      "fetched_at": "2026-03-12 19:35:57.920083",
+      "price_df": "Empty DataFrame\nColumns: [date, open, high, low, close, volume]\nIndex: []",
+      "option_chain_raw": {},
+      "option_chain_summary": "OptionChainSummary(support=None, resistance=None, pcr=1.0, bias='neutral')",
+      "vix_value": null,
+      "spot_price": 24000.0,
+      "fii_data": {
+        "net_futures_position": 0.0,
+        "put_write_score": 0.0,
+        "call_write_score": 0.0,
+        "_fallback": true
+      },
+      "quality": "MarketDataQuality(price_data_available=False, option_chain_available=False, vix_available=False, fii_data_available=False, price_fresh=False, option_chain_fresh=False, vix_fresh=False, used_price_fallback=True, used_option_chain_fallback=True, used_vix_fallback=True, issues=['price_data_unavailable', 'option_chain_unavailable', 'vix_unavailable', 'fii_data_fallback'])"
+    },
+    "agent_health": {
+      "chart": {
+        "status": "ok",
+        "fallback": false,
+        "error": null
+      },
+      "option_chain": {
+        "status": "ok",
+        "fallback": false,
+        "error": null
+      },
+      "news": {
+        "status": "ok",
+        "fallback": false,
+        "error": null
+      },
+      "vol": {
+        "status": "ok",
+        "fallback": false,
+        "error": null
+      },
+      "regime": {
+        "status": "ok",
+        "fallback": false,
+        "error": null
+      },
+      "liquidity": {
+        "status": "ok",
+        "fallback": false,
+        "error": null
+      },
+      "fii_positioning": {
+        "status": "ok",
+        "fallback": false,
+        "error": null
+      },
+      "gamma_analysis": {
+        "status": "ok",
+        "fallback": false,
+        "error": null
+      },
+      "liquidity_sweep": {
+        "status": "ok",
+        "fallback": false,
+        "error": null
+      }
+    },
+    "chart": {
+      "trend": "neutral",
+      "structure": "unknown",
+      "confidence": 0.1
+    },
+    "option_chain": {
+      "support": null,
+      "resistance": null,
+      "pcr": 1.0,
+      "bias": "neutral"
+    },
+    "news": {
+      "macro_bias": "neutral",
+      "risk_level": "high",
+      "data_available": false,
+      "fallback_used": true
+    },
+    "vol": {
+      "volatility": "medium",
+      "expected_range": [
+        23788.339895114834,
+        24211.660104885166
+      ],
+      "data_available": false,
+      "fallback_used": true
+    },
+    "regime": {
+      "regime": "range_bound",
+      "confidence": 0.1
+    },
+    "liquidity": {
+      "liquidity": "medium",
+      "slippage_risk": "medium"
+    },
+    "fii_positioning": {
+      "fii_bias": "neutral",
+      "institutional_support": null,
+      "institutional_resistance": null,
+      "confidence": 0.1
+    },
+    "gamma_analysis": {
+      "gamma_regime": "positive_gamma",
+      "gamma_flip_level": null,
+      "expected_move": "compression"
+    },
+    "liquidity_sweep": {
+      "liquidity_event": false,
+      "event_type": "none",
+      "confidence": 0.1
+    },
+    "signal": {
+      "signal": "NONE",
+      "entry": 24000.0,
+      "stop_loss": 24000.0,
+      "target": 24000.0,
+      "confidence": 0.0,
+      "rationale": "Signals are not aligned.",
+      "underlying_spot": 24000.0,
+      "option_strike": null,
+      "option_expiry": null,
+      "instrument_symbol": null,
+      "instrument_key": null,
+      "price_source": "unknown",
+      "data_complete": false
+    },
+    "score_breakdown": {
+      "chart_alignment": 0,
+      "option_chain_confirmation": 0,
+      "regime_confirmation": 0,
+      "fii_positioning": 0,
+      "gamma_signal": 0,
+      "liquidity_validation": 0
+    },
+    "score_complete": false,
+    "decision_score": 0
+  },
+  "score_breakdown": {
+    "chart_alignment": 0,
+    "option_chain_confirmation": 0,
+    "regime_confirmation": 0,
+    "fii_positioning": 0,
+    "gamma_signal": 0,
+    "liquidity_validation": 0
+  },
+  "score_complete": false,
+  "agent_health": {
+    "chart": {
+      "status": "ok",
+      "fallback": false,
+      "error": null
+    },
+    "option_chain": {
+      "status": "ok",
+      "fallback": false,
+      "error": null
+    },
+    "news": {
+      "status": "ok",
+      "fallback": false,
+      "error": null
+    },
+    "vol": {
+      "status": "ok",
+      "fallback": false,
+      "error": null
+    },
+    "regime": {
+      "status": "ok",
+      "fallback": false,
+      "error": null
+    },
+    "liquidity": {
+      "status": "ok",
+      "fallback": false,
+      "error": null
+    },
+    "fii_positioning": {
+      "status": "ok",
+      "fallback": false,
+      "error": null
+    },
+    "gamma_analysis": {
+      "status": "ok",
+      "fallback": false,
+      "error": null
+    },
+    "liquidity_sweep": {
+      "status": "ok",
+      "fallback": false,
+      "error": null
+    }
+  },
+  "market_data_quality": {
+    "price_data_available": false,
+    "option_chain_available": false,
+    "vix_available": false,
+    "fii_data_available": false,
+    "price_fresh": false,
+    "option_chain_fresh": false,
+    "vix_fresh": false,
+    "used_price_fallback": true,
+    "used_option_chain_fallback": true,
+    "used_vix_fallback": true,
+    "issues": [
+      "price_data_unavailable",
+      "option_chain_unavailable",
+      "vix_unavailable",
+      "fii_data_fallback"
+    ]
+  }
+}

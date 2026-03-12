@@ -1,0 +1,20 @@
+{
+  "service_started_at": "2026-03-12T20:00:07.503371",
+  "last_cycle_started_at": "2026-03-12T20:00:09.025875",
+  "last_cycle_completed_at": "2026-03-12T20:00:09.026093",
+  "last_monitor_completed_at": "2026-03-12T20:00:09.026290",
+  "last_missed_trade_analysis_at": "2026-03-12T20:00:09.006474",
+  "last_error": "exit_alert_failed: twilio down",
+  "cycle_failures": 1,
+  "monitor_failures": 0,
+  "missed_trade_failures": 0,
+  "trade_alert_failures": 1,
+  "exit_alert_failures": 1,
+  "startup_checks": {},
+  "journal": {
+    "total_signals": 0,
+    "open_trades": 0,
+    "last_signal_timestamp": null
+  },
+  "market_timezone": "Asia/Kolkata"
+}

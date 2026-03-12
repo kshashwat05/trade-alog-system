@@ -17,6 +17,8 @@ class MissedTradeAnalysis:
     target_hit: bool
     stop_loss_hit: bool
     final_pnl: float | None
+    available: bool
+    reason: str | None
 
 
 class MissedTradeAnalyzer:
@@ -34,6 +36,8 @@ class MissedTradeAnalyzer:
                 target_hit=False,
                 stop_loss_hit=False,
                 final_pnl=None,
+                available=False,
+                reason="No pricing series available for simulation.",
             )
 
         entry = trade.entry_price
@@ -41,14 +45,10 @@ class MissedTradeAnalyzer:
         target_hit = False
         stop_loss_hit = False
         for price in prices:
-            pnl = price - entry if trade.signal_type == "BUY_CE" else entry - price
+            pnl = price - entry
             pnl_values.append(pnl)
-            if trade.signal_type == "BUY_CE":
-                target_hit = target_hit or price >= trade.target
-                stop_loss_hit = stop_loss_hit or price <= trade.stop_loss
-            else:
-                target_hit = target_hit or price <= trade.target
-                stop_loss_hit = stop_loss_hit or price >= trade.stop_loss
+            target_hit = target_hit or price >= trade.target
+            stop_loss_hit = stop_loss_hit or price <= trade.stop_loss
 
         return MissedTradeAnalysis(
             signal_id=trade.id,
@@ -57,6 +57,8 @@ class MissedTradeAnalyzer:
             target_hit=target_hit,
             stop_loss_hit=stop_loss_hit,
             final_pnl=pnl_values[-1],
+            available=True,
+            reason=None,
         )
 
     def analyze_trade(self, signal_id: int) -> MissedTradeAnalysis:
@@ -64,13 +66,34 @@ class MissedTradeAnalyzer:
         if trade is None:
             raise ValueError(f"Unknown trade id {signal_id}")
 
-        candles = self.client.fetch_nifty_intraday(days=1).df
-        if candles.empty:
-            analysis = self._analyze_series(trade, [])
+        if "simulation_prices" in trade.metadata:
+            analysis = self._analyze_series(trade, list(trade.metadata["simulation_prices"]))
+        elif "instrument_key" not in trade.metadata:
+            analysis = MissedTradeAnalysis(
+                signal_id=trade.id,
+                max_profit=0.0,
+                max_drawdown=0.0,
+                target_hit=False,
+                stop_loss_hit=False,
+                final_pnl=None,
+                available=False,
+                reason="Simulation requires instrument_key or simulation_prices metadata.",
+            )
+            logger.warning(
+                f"Missed trade simulation skipped for trade_id={trade.id}: {analysis.reason}"
+            )
+            return analysis
         else:
-            signal_timestamp = datetime.fromisoformat(trade.timestamp)
-            series = candles[candles["date"] >= signal_timestamp]["close"].tolist()
-            analysis = self._analyze_series(trade, series)
+            candles = self.client.fetch_intraday_by_instrument_key(str(trade.metadata["instrument_key"]), days=1).df
+            if candles.empty:
+                analysis = self._analyze_series(trade, [])
+            else:
+                signal_timestamp = datetime.fromisoformat(trade.timestamp)
+                series = candles[candles["date"] >= signal_timestamp]["close"].tolist()
+                analysis = self._analyze_series(trade, series)
+
+        if not analysis.available:
+            return analysis
 
         self.journal.update_simulation(
             signal_id,

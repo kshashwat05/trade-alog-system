@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pandas as pd
@@ -9,6 +9,8 @@ from loguru import logger
 from ta.trend import ADXIndicator, EMAIndicator
 
 from ai_trader.data.kite_client import KiteClient
+if TYPE_CHECKING:
+    from ai_trader.data.market_data_context import MarketDataContext
 
 Regime = Literal["trend_up", "trend_down", "range_bound", "high_volatility"]
 
@@ -42,9 +44,9 @@ class RegimeAgent:
         df["vol_20"] = df["returns"].rolling(20).std()
         return df
 
-    def analyze(self) -> RegimeAnalysis:
-        price_data = self.client.fetch_nifty_intraday()
-        df = self._compute_features(price_data.df)
+    def analyze(self, context: MarketDataContext | None = None) -> RegimeAnalysis:
+        df = context.price_df if context is not None else self.client.fetch_nifty_intraday().df
+        df = self._compute_features(df)
         if df.empty:
             logger.warning("RegimeAgent received empty data; returning range_bound regime.")
             return RegimeAnalysis(regime="range_bound", confidence=0.1)

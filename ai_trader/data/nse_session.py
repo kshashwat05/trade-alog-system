@@ -27,4 +27,7 @@ def build_nse_session() -> requests.Session:
 
 
 def prime_nse_session(session: requests.Session) -> None:
+    if getattr(session, "_nse_primed", False):
+        return
     session.get(NSE_HOME_URL, timeout=5)
+    setattr(session, "_nse_primed", True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -40,7 +41,13 @@ class NseOptionChainClient:
             self._prime_session()
             resp = self.session.get(self.NSE_OPTION_CHAIN_URL, timeout=5)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            if not isinstance(data, dict):
+                logger.warning("NSE option chain returned a non-dict payload; using empty fallback.")
+                return {}
+            data.setdefault("_meta", {})
+            data["_meta"]["fetched_at"] = datetime.utcnow().isoformat()
+            return data
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Failed to fetch NSE option chain: {exc}")
             return {}
@@ -48,9 +55,33 @@ class NseOptionChainClient:
     def summarize(self, data: Optional[Dict[str, Any]] = None) -> OptionChainSummary:
         if data is None:
             data = self.fetch_raw()
+        if not isinstance(data, dict):
+            logger.warning("Malformed option chain payload; returning neutral summary.")
+            return OptionChainSummary(
+                support=None,
+                resistance=None,
+                pcr=1.0,
+                bias="neutral",
+            )
 
         records = data.get("records", {})
+        if not isinstance(records, dict):
+            logger.warning("Malformed option chain records payload; returning neutral summary.")
+            return OptionChainSummary(
+                support=None,
+                resistance=None,
+                pcr=1.0,
+                bias="neutral",
+            )
         oi_data = records.get("data", [])
+        if not isinstance(oi_data, list):
+            logger.warning("Malformed option chain data rows; returning neutral summary.")
+            return OptionChainSummary(
+                support=None,
+                resistance=None,
+                pcr=1.0,
+                bias="neutral",
+            )
         if not oi_data:
             logger.warning("Empty option chain data; returning neutral summary.")
             return OptionChainSummary(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pandas as pd
@@ -10,6 +10,8 @@ from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
 
 from ai_trader.data.kite_client import KiteClient
+if TYPE_CHECKING:
+    from ai_trader.data.market_data_context import MarketDataContext
 
 Trend = Literal["bullish", "bearish", "neutral"]
 Structure = Literal["breakout", "reversal", "range", "unknown"]
@@ -108,9 +110,9 @@ class ChartAgent:
 
         return ChartAnalysis(trend=trend, structure=structure, confidence=confidence)
 
-    def analyze(self) -> ChartAnalysis:
-        price_data = self.client.fetch_nifty_intraday()
-        df = self._compute_indicators(price_data.df)
+    def analyze(self, context: MarketDataContext | None = None) -> ChartAnalysis:
+        df = context.price_df if context is not None else self.client.fetch_nifty_intraday().df
+        df = self._compute_indicators(df)
         analysis = self._detect_trend_and_structure(df)
         logger.info(f"ChartAgent analysis: {analysis}")
         return analysis

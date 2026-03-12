@@ -36,29 +36,25 @@ class PositionMonitorAgent:
     def _determine_exit(entry: TradeJournalEntry, current_price: float) -> tuple[str | None, float]:
         execution_price = entry.execution_price or entry.entry_price
         quantity = entry.quantity or 1
-        if entry.signal_type == "BUY_CE":
-            pnl = (current_price - execution_price) * quantity
-            reversal_threshold = execution_price - ((execution_price - entry.stop_loss) * 0.5)
-            if current_price >= entry.target:
-                return STATUS_TARGET_HIT, pnl
-            if current_price <= entry.stop_loss:
-                return STATUS_STOP_LOSS_HIT, pnl
-            if current_price <= reversal_threshold:
-                return STATUS_REVERSAL_EXIT, pnl
-        else:
-            pnl = (execution_price - current_price) * quantity
-            reversal_threshold = execution_price + ((entry.stop_loss - execution_price) * 0.5)
-            if current_price <= entry.target:
-                return STATUS_TARGET_HIT, pnl
-            if current_price >= entry.stop_loss:
-                return STATUS_STOP_LOSS_HIT, pnl
-            if current_price >= reversal_threshold:
-                return STATUS_REVERSAL_EXIT, pnl
+        pnl = (current_price - execution_price) * quantity
+        reversal_threshold = execution_price - ((execution_price - entry.stop_loss) * 0.5)
+        if current_price >= entry.target:
+            return STATUS_TARGET_HIT, pnl
+        if current_price <= entry.stop_loss:
+            return STATUS_STOP_LOSS_HIT, pnl
+        if current_price <= reversal_threshold:
+            return STATUS_REVERSAL_EXIT, pnl
         return None, pnl
 
     def monitor_once(self) -> list[PositionMonitorResult]:
         results: list[PositionMonitorResult] = []
         for trade in self.journal.get_open_trades():
+            instrument_key = trade.metadata.get("instrument_key")
+            if not instrument_key:
+                logger.info(
+                    f"Position monitor skipped trade_id={trade.id} because no instrument_key metadata is available."
+                )
+                continue
             current_price = self.price_fetcher(trade)
             if current_price is None:
                 logger.warning(f"Position monitor could not fetch current price for trade_id={trade.id}.")

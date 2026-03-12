@@ -14,10 +14,12 @@ class Settings(BaseSettings):
 
     # Risk parameters
     max_daily_loss: float = 20000.0
-    max_trades_per_day: int = 5
+    max_trades_per_day: int = 3
     max_position_lots: int = 2
-    signal_cooldown_minutes: int = 10
+    max_open_trades: int = 1
+    signal_cooldown_minutes: int = 15
     position_monitor_interval_seconds: int = 20
+    orchestrator_min_score: int = 7
 
     # Market hours (IST)
     market_start_hour: int = 9
@@ -27,22 +29,33 @@ class Settings(BaseSettings):
     market_timezone: str = "Asia/Kolkata"
 
     # External APIs
-    kite_api_key: Optional[str] = None
-    kite_api_secret: Optional[str] = None
-    kite_access_token: Optional[str] = None
+    kite_api_key: Optional[str] = Field(default=None, repr=False)
+    kite_api_secret: Optional[str] = Field(default=None, repr=False)
+    kite_access_token: Optional[str] = Field(default=None, repr=False)
     kite_instrument_token: Optional[int] = None
 
-    news_api_key: Optional[str] = None
+    news_api_key: Optional[str] = Field(default=None, repr=False)
+    openai_api_key: Optional[str] = Field(default=None, repr=False)
+    llm_model: str = "gpt-4.1-mini"
+    llm_validation_enabled: bool = False
+    market_data_cache_seconds: int = 20
+    max_price_candle_age_seconds: int = 900
+    max_option_chain_age_seconds: int = 180
+    max_vix_age_seconds: int = 300
+    max_news_age_seconds: int = 1800
 
-    twilio_account_sid: Optional[str] = None
-    twilio_auth_token: Optional[str] = None
-    twilio_whatsapp_from: Optional[str] = None
-    whatsapp_to: Optional[str] = None
+    twilio_account_sid: Optional[str] = Field(default=None, repr=False)
+    twilio_auth_token: Optional[str] = Field(default=None, repr=False)
+    twilio_whatsapp_from: Optional[str] = Field(default=None, repr=False)
+    whatsapp_to: Optional[str] = Field(default=None, repr=False)
 
     # Backtesting
     backtest_data_path: str = "ai_trader/tests/mock_data/nifty_intraday.csv"
     trade_journal_path: str = "ai_trader/data/trade_journal.db"
     live_state_path: str = "ai_trader/data/live_state.json"
+    runtime_health_path: str = "ai_trader/data/runtime_health.json"
+    replay_reports_path: str = "ai_trader/data/replay_reports"
+    strict_startup_checks: bool = False
 
     model_config = SettingsConfigDict(
         env_prefix="",

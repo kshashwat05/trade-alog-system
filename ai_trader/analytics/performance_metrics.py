@@ -70,4 +70,20 @@ def summarize_by_outcome(trades: Iterable[TradeJournalEntry]) -> dict[str, dict[
         "executed": asdict(calculate_performance_metrics(executed)),
         "missed": asdict(calculate_performance_metrics(missed)),
         "overall": asdict(calculate_performance_metrics(trades)),
+        "signal_accuracy": {
+            "correct_signals": sum(1 for trade in trades if (trade.pnl or 0.0) > 0),
+            "total_scored_signals": len([trade for trade in trades if trade.pnl is not None]),
+        },
+        "institutional_alignment_success_rate": {
+            "aligned_wins": sum(
+                1 for trade in trades if trade.institutional_bias and (trade.pnl or 0.0) > 0
+            ),
+            "aligned_signals": sum(1 for trade in trades if trade.institutional_bias),
+        },
+        "llm_approval_impact": {
+            "with_llm_reasoning": sum(1 for trade in trades if trade.llm_reasoning),
+            "llm_positive_pnl": sum(
+                1 for trade in trades if trade.llm_reasoning and (trade.pnl or 0.0) > 0
+            ),
+        },
     }
