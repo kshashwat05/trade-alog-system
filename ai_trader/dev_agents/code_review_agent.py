@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import subprocess
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 import sys
 
 from loguru import logger
+
+from ai_trader.config.settings import settings
 
 try:  # Best-effort import; agent still works without crewai.
     from crewai import Agent, Task  # type: ignore
@@ -64,6 +67,31 @@ class CodeReviewAgent:
             logger.error(f"Static check failed to run: {exc}")
             issues.append(str(exc))
 
+        journal_db = self.project_root / settings.trade_journal_path
+        if journal_db.exists():
+            try:
+                conn = sqlite3.connect(journal_db)
+                row = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='trades'"
+                ).fetchone()
+                if row is None:
+                    issues.append("Trade journal database exists but trades table is missing.")
+                conn.close()
+            except sqlite3.Error as exc:
+                issues.append(f"Trade journal integrity check failed: {exc}")
+
+        risk_source = (self.project_root / "ai_trader/agents/risk_agent.py").read_text()
+        if "signal_cooldown_minutes" not in risk_source:
+            issues.append("Risk agent does not appear to enforce signal cooldowns.")
+
+        http_source = (self.project_root / "ai_trader/data/http_client.py").read_text()
+        if "Retry(" not in http_source:
+            issues.append("HTTP client retries are not configured.")
+
+        main_source = (self.project_root / "ai_trader/main.py").read_text()
+        if "trading_engine.log" not in main_source:
+            suggestions.append("Consider consolidating all runtime logging into logs/trading_engine.log.")
+
         if not issues:
             suggestions.append("Consider adding a dedicated linter like ruff or flake8.")
 
@@ -78,4 +106,3 @@ class CodeReviewAgent:
                 logger.warning(f"Failed to create crewai Task in CodeReviewAgent: {exc}")
 
         return CodeReviewReport(issues=issues, suggestions=suggestions)
-

@@ -7,10 +7,14 @@ websocket-client
 langgraph
 crewai
 pytest
+pytest-cov
 pydantic
 pydantic-settings
 python-dotenv
 schedule
 loguru
 twilio
+fastapi
+uvicorn
+httpx
 PyYAML==6.0.3

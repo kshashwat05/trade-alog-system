@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from threading import Lock
 
 from loguru import logger
@@ -23,6 +23,7 @@ class RiskManagerAgent:
         self._trade_count_by_day: dict[date, int] = {}
         self._pnl_by_day: dict[date, float] = {}
         self._lock = Lock()
+        self._last_signal_at: datetime | None = None
 
     def record_trade_result(self, trade_date: date, pnl: float) -> None:
         with self._lock:
@@ -38,11 +39,16 @@ class RiskManagerAgent:
     def record_trade_open_today(self) -> None:
         self.record_trade_open(self._get_today())
 
+    def record_signal_emitted(self, emitted_at: datetime | None = None) -> None:
+        with self._lock:
+            self._last_signal_at = emitted_at or datetime.now()
+
     def check(self, signal: TradeSignal, lots: int = 1) -> RiskCheckResult:
         today = self._get_today()
         with self._lock:
             day_trades = self._trade_count_by_day.get(today, 0)
             day_pnl = self._pnl_by_day.get(today, 0.0)
+            last_signal_at = self._last_signal_at
 
         if day_pnl <= -settings.max_daily_loss:
             reason = f"Daily loss limit exceeded: {day_pnl} <= -{settings.max_daily_loss}"
@@ -61,6 +67,16 @@ class RiskManagerAgent:
 
         if signal.signal == "NONE":
             return RiskCheckResult(allowed=False, reason="No trade signal.")
+
+        if last_signal_at is not None:
+            cooldown = timedelta(minutes=settings.signal_cooldown_minutes)
+            if datetime.now() - last_signal_at < cooldown:
+                reason = (
+                    f"Signal cooldown active until "
+                    f"{(last_signal_at + cooldown).isoformat(timespec='seconds')}"
+                )
+                logger.warning(reason)
+                return RiskCheckResult(allowed=False, reason=reason)
 
         if signal.entry <= 0:
             return RiskCheckResult(allowed=False, reason="Signal entry price must be positive.")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict
 
 from langgraph.graph import StateGraph
@@ -19,6 +20,7 @@ from ai_trader.agents.risk_agent import RiskManagerAgent, RiskCheckResult
 
 @dataclass
 class OrchestratorOutput:
+    timestamp: str
     signal: TradeSignal
     risk: RiskCheckResult
     decision_score: int
@@ -121,6 +123,7 @@ class DecisionEngine:
 
         risk = self.risk_agent.check(signal)
         output = OrchestratorOutput(
+            timestamp=datetime.utcnow().isoformat(),
             signal=signal,
             risk=risk,
             decision_score=decision_score,

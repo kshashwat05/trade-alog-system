@@ -20,6 +20,7 @@ class TestRunResult:
     success: bool
     pytest_exit_code: int
     coverage_file: str | None
+    coverage_summary: str | None
     output: str
 
 
@@ -42,7 +43,17 @@ class TestingAgent:
                 self.agent = None
 
     def run_pytest(self, extra_args: List[str] | None = None) -> TestRunResult:
-        args = [sys.executable, "-m", "pytest", "-q", "--maxfail=1", "--disable-warnings"]
+        args = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "--maxfail=1",
+            "--disable-warnings",
+            "--cov=ai_trader",
+            "--cov-report=term-missing",
+            "--cov-report=xml",
+        ]
         if extra_args:
             args.extend(extra_args)
 
@@ -61,12 +72,17 @@ class TestingAgent:
                 success=False,
                 pytest_exit_code=1,
                 coverage_file=None,
+                coverage_summary=None,
                 output=str(exc),
             )
 
         output = proc.stdout + "\n" + proc.stderr
         success = proc.returncode == 0
         coverage_file = ".coverage" if (self.project_root / ".coverage").exists() else None
+        coverage_summary = None
+        for line in output.splitlines():
+            if line.strip().startswith("TOTAL"):
+                coverage_summary = line.strip()
 
         logger.info(f"Pytest completed with code {proc.returncode}")
         # Optionally register a crewai Task if available (no-op otherwise)
@@ -84,6 +100,6 @@ class TestingAgent:
             success=success,
             pytest_exit_code=proc.returncode,
             coverage_file=coverage_file,
+            coverage_summary=coverage_summary,
             output=output,
         )
-

@@ -51,3 +51,18 @@ class WhatsAppAlerter:
             logger.info("WhatsApp alert sent successfully.")
         except TwilioRestException as exc:
             logger.error(f"Failed to send WhatsApp alert: {exc}")
+
+    def send_exit_alert(self, message: str) -> None:
+        if self.client is None:
+            logger.info(f"WhatsApp exit alert (mock): {message}")
+            return
+
+        try:
+            self.client.messages.create(
+                body=message,
+                from_=settings.twilio_whatsapp_from,
+                to=settings.whatsapp_to,
+            )
+            logger.info("WhatsApp exit alert sent successfully.")
+        except TwilioRestException as exc:
+            logger.error(f"Failed to send WhatsApp exit alert: {exc}")

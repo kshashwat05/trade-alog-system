@@ -148,6 +148,22 @@ def test_risk_manager_enforces_max_trades_per_day():
     assert check.reason is not None
 
 
+def test_risk_manager_enforces_cooldown():
+    risk = RiskManagerAgent()
+    signal = TradeSignal(
+        signal="BUY_CE",
+        entry=1.0,
+        stop_loss=0.8,
+        target=1.2,
+        confidence=0.9,
+        rationale="test",
+    )
+    risk.record_signal_emitted()
+    check = risk.check(signal, lots=1)
+    assert check.allowed is False
+    assert check.reason is not None
+
+
 def test_is_market_open_uses_configured_market_window():
     inside = datetime(2026, 3, 12, 10, 0)
     outside = datetime(2026, 3, 12, 16, 0)

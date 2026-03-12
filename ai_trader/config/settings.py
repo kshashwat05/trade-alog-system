@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     max_daily_loss: float = 20000.0
     max_trades_per_day: int = 5
     max_position_lots: int = 2
+    signal_cooldown_minutes: int = 10
+    position_monitor_interval_seconds: int = 20
 
     # Market hours (IST)
     market_start_hour: int = 9
@@ -39,6 +41,8 @@ class Settings(BaseSettings):
 
     # Backtesting
     backtest_data_path: str = "ai_trader/tests/mock_data/nifty_intraday.csv"
+    trade_journal_path: str = "ai_trader/data/trade_journal.db"
+    live_state_path: str = "ai_trader/data/live_state.json"
 
     model_config = SettingsConfigDict(
         env_prefix="",
