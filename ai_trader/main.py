@@ -114,7 +114,11 @@ def run_startup_preflight() -> dict[str, object]:
             and settings.twilio_whatsapp_from
             and settings.whatsapp_to
         ),
-        "news_configured": bool(settings.news_api_key),
+        "news_configured": bool(
+            settings.news_api_key
+            or settings.newsdata_api_key
+            or settings.marketaux_api_key
+        ),
         "llm_configured": (not settings.llm_validation_enabled)
         or (
             bool(settings.openai_api_key)
@@ -152,7 +156,9 @@ def run_startup_preflight() -> dict[str, object]:
     if not checks["twilio_configured"]:
         checks["warnings"].append("Twilio credentials incomplete; alerts will run in mock mode.")  # type: ignore[index]
     if not checks["news_configured"]:
-        checks["warnings"].append("News API key missing; news gating will mark context unavailable.")  # type: ignore[index]
+        checks["warnings"].append(
+            "No API-backed news source configured; the system will rely on RSS feeds only for macro news."
+        )  # type: ignore[index]
     if settings.llm_validation_enabled and not checks["llm_configured"]:
         missing_key_name = "OPENAI_API_KEY" if settings.llm_provider.lower() == "openai" else "GEMINI_API_KEY"
         checks["errors"].append(f"LLM validation enabled but {missing_key_name} is missing.")  # type: ignore[index]

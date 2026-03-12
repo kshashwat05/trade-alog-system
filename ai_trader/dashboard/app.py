@@ -471,6 +471,71 @@ def create_dashboard_app() -> FastAPI:
               `;
             }
 
+            function renderGlobalMarkets(liveState) {
+              const state = liveState.state || {};
+              const globalMarket = state.global_market || {};
+              const macroCalendar = state.macro_calendar || {};
+              const globalSentiment = state.global_sentiment || {};
+              const indicators = globalMarket.indicators || {};
+              const rows = Object.entries(indicators).map(([key, value]) => `
+                <div>${escapeHtml(key.replaceAll('_', ' '))}</div>
+                <div>${value == null ? 'n/a' : `${fmtNumber(value)}%`}</div>
+              `).join('');
+
+              return `
+                <div class="card">
+                  <h2>Global Market Panel</h2>
+                  <p class="section-copy">Cross-asset and macro context that can block otherwise clean technical setups.</p>
+                  <div>
+                    ${statusPill(`Global bias: ${globalMarket.global_bias || 'n/a'}`, globalMarket.global_bias === 'bearish' ? 'warn' : globalMarket.global_bias === 'bullish' ? 'ok' : 'neutral')}
+                    ${statusPill(`Risk sentiment: ${globalMarket.risk_sentiment || 'n/a'}`, globalMarket.risk_sentiment === 'risk_off' ? 'bad' : globalMarket.risk_sentiment === 'risk_on' ? 'ok' : 'neutral')}
+                    ${statusPill(`Macro risk: ${macroCalendar.event_risk || 'n/a'}`, macroCalendar.event_risk === 'high' ? 'bad' : macroCalendar.event_risk === 'medium' ? 'warn' : 'ok')}
+                    ${statusPill(`Global sentiment: ${globalSentiment.market_sentiment || 'n/a'}`, 'neutral')}
+                  </div>
+                  <div class="split" style="margin-top: 14px;">
+                    <div class="reason-box">
+                      <strong>What this means</strong><br>
+                      ${escapeHtml(globalSentiment.rationale || 'No global sentiment narrative is available yet.')}<br><br>
+                      Next macro event to watch: <strong>${escapeHtml(macroCalendar.event_type || 'none')}</strong>.
+                    </div>
+                    <div class="kv">${rows || '<div class="empty">No global indicators are available.</div>'}</div>
+                  </div>
+                </div>
+              `;
+            }
+
+            function renderNewsIntel(liveState) {
+              const state = liveState.state || {};
+              const news = state.news || {};
+              const headlines = news.top_headlines || [];
+              const macroEvents = (state.macro_calendar || {}).upcoming_events || [];
+
+              return `
+                <div class="card">
+                  <h2>News Intelligence</h2>
+                  <p class="section-copy">The macro headline feed translated into trade risk.</p>
+                  <div>
+                    ${statusPill(`Bias: ${news.macro_bias || 'n/a'}`, news.macro_bias === 'bearish' ? 'warn' : news.macro_bias === 'bullish' ? 'ok' : 'neutral')}
+                    ${statusPill(`Risk: ${news.risk_level || 'n/a'}`, news.risk_level === 'high' ? 'bad' : news.risk_level === 'medium' ? 'warn' : 'ok')}
+                    ${statusPill(`Impact: ${news.impact_level || 'n/a'}`, news.impact_level === 'high' ? 'bad' : news.impact_level === 'medium' ? 'warn' : 'ok')}
+                    ${statusPill(`${news.article_count || 0} recent articles`, 'neutral')}
+                  </div>
+                  <div class="split" style="margin-top: 14px;">
+                    <div>
+                      <div class="reason-box">
+                        <strong>Top headlines</strong><br>
+                        ${headlines.length ? headlines.map(item => `• ${escapeHtml(item.title || item.description || 'Untitled headline')}`).join('<br>') : 'No recent macro headlines available.'}
+                      </div>
+                    </div>
+                    <div class="reason-box">
+                      <strong>Upcoming macro events</strong><br>
+                      ${macroEvents.length ? macroEvents.map(event => `${escapeHtml(event.title || event.category || 'Event')} (${escapeHtml(event.date || 'time tbd')})`).join('<br>') : 'No major calendar events detected.'}
+                    </div>
+                  </div>
+                </div>
+              `;
+            }
+
             function renderPerformance(analytics) {
               const overall = analytics.overall || {};
               const executed = analytics.executed || {};
@@ -581,6 +646,8 @@ def create_dashboard_app() -> FastAPI:
                   ${renderReadiness(health, readiness)}
                   ${renderLiveDecision(liveState)}
                   ${renderInstitutional(liveState)}
+                  ${renderGlobalMarkets(liveState)}
+                  ${renderNewsIntel(liveState)}
                   ${renderPerformance(analytics)}
                   <div class="card">
                     <h2>LLM Reasoning</h2>

@@ -430,7 +430,7 @@ def test_news_agent_handles_non_list_payload_and_positive_sentiment_cache():
     assert first.macro_bias == "bullish"
     assert first.data_available is True
     assert second.macro_bias == "bullish"
-    assert session.calls == 1
+    assert session.calls == 4
 
 
 def test_nse_option_chain_fetch_and_summarize_handles_success_and_edge_cases(monkeypatch):

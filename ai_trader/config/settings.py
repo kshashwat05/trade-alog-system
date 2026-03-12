@@ -38,12 +38,20 @@ class Settings(BaseSettings):
     kite_instrument_token: Optional[int] = None
 
     news_api_key: Optional[str] = Field(default=None, repr=False)
+    newsdata_api_key: Optional[str] = Field(default=None, repr=False)
+    marketaux_api_key: Optional[str] = Field(default=None, repr=False)
+    financial_modeling_prep_api_key: Optional[str] = Field(default=None, repr=False)
+    alpha_vantage_api_key: Optional[str] = Field(default=None, repr=False)
+    tradingeconomics_api_key: Optional[str] = Field(default=None, repr=False)
     openai_api_key: Optional[str] = Field(default=None, repr=False)
     gemini_api_key: Optional[str] = Field(default=None, repr=False)
     llm_provider: str = "gemini"
     llm_model: str = "gemini-2.0-flash"
     llm_validation_enabled: bool = False
     market_data_cache_seconds: int = 20
+    news_feed_cache_seconds: int = 120
+    global_market_cache_seconds: int = 120
+    macro_calendar_cache_seconds: int = 300
     max_price_candle_age_seconds: int = 900
     max_option_chain_age_seconds: int = 180
     max_vix_age_seconds: int = 300

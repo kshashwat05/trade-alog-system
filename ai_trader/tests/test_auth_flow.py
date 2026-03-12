@@ -208,6 +208,23 @@ def test_token_manager_auto_opens_browser(monkeypatch):
     assert opened_urls == ["http://kite/login"]
 
 
+def test_token_manager_prefers_runtime_redirect_env_over_settings(tmp_path, monkeypatch):
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "KITE_API_KEY=test-key",
+                "KITE_API_SECRET=test-secret",
+                "KITE_REDIRECT_URL=http://localhost:9000/callback",
+            ]
+        )
+        + "\n"
+    )
+    monkeypatch.setattr(settings, "kite_redirect_url", "http://localhost:8000/callback")
+    manager = TokenManager(env_path=env_path)
+    assert manager.redirect_url == "http://localhost:9000/callback"
+
+
 def test_start_trading_day_authenticates_then_starts_runtime(monkeypatch):
     from ai_trader import start_trading_day
 

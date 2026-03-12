@@ -24,8 +24,12 @@ from ai_trader.agents.trigger_agent import TradeTriggerAgent, TradeSignal
 from ai_trader.agents.risk_agent import RiskManagerAgent, RiskCheckResult
 from ai_trader.agents.fii_positioning_agent import FiiPositioningAgent, FiiPositioningAnalysis
 from ai_trader.agents.gamma_agent import GammaAgent, GammaAnalysis
+from ai_trader.agents.global_market_agent import GlobalMarketAgent, GlobalMarketAnalysis
 from ai_trader.agents.liquidity_sweep_agent import LiquiditySweepAgent, LiquiditySweepAnalysis
 from ai_trader.agents.llm_validator_agent import LlmValidationResult, LlmValidatorAgent
+from ai_trader.agents.macro_calendar_agent import MacroCalendarAgent, MacroCalendarAnalysis
+from ai_trader.analysis.global_sentiment_engine import GlobalSentimentAnalysis, GlobalSentimentEngine
+from ai_trader.analysis.news_impact_engine import NewsImpactAnalysis
 from ai_trader.config.settings import settings
 from ai_trader.data.market_data_context import MarketDataProvider
 from ai_trader.data.nse_option_chain import NseOptionChainClient
@@ -62,6 +66,9 @@ class DecisionEngine:
         self.fii_agent = FiiPositioningAgent()
         self.gamma_agent = GammaAgent()
         self.liquidity_sweep_agent = LiquiditySweepAgent()
+        self.global_market_agent = GlobalMarketAgent()
+        self.macro_calendar_agent = MacroCalendarAgent()
+        self.global_sentiment_engine = GlobalSentimentEngine()
         self.trigger_agent = TradeTriggerAgent()
         self.risk_agent = RiskManagerAgent()
         self.llm_validator = LlmValidatorAgent()
@@ -110,13 +117,25 @@ class DecisionEngine:
                 event_type="none",
                 confidence=0.0,
             ),
+            "global_market": lambda: GlobalMarketAnalysis(
+                global_bias="neutral",
+                risk_sentiment="neutral",
+                confidence=0.0,
+            ),
+            "macro_calendar": lambda: MacroCalendarAnalysis(
+                event_risk="medium",
+                event_type="calendar_unavailable",
+                expected_market_impact="neutral",
+                data_available=False,
+                fallback_used=True,
+            ),
         }
 
         def gather_node(state: Dict[str, Any]) -> Dict[str, Any]:
             context = self.market_data_provider.build()
             state["market_context"] = context
             state["agent_health"] = {}
-            with ThreadPoolExecutor(max_workers=9) as executor:
+            with ThreadPoolExecutor(max_workers=11) as executor:
                 futures = {
                     "chart": executor.submit(self.chart_agent.analyze, context),
                     "option_chain": executor.submit(self.option_agent.analyze, context),
@@ -127,6 +146,8 @@ class DecisionEngine:
                     "fii_positioning": executor.submit(self.fii_agent.analyze, context),
                     "gamma_analysis": executor.submit(self.gamma_agent.analyze, context),
                     "liquidity_sweep": executor.submit(self.liquidity_sweep_agent.analyze, context),
+                    "global_market": executor.submit(self.global_market_agent.analyze),
+                    "macro_calendar": executor.submit(self.macro_calendar_agent.analyze),
                 }
                 for key, future in futures.items():
                     try:
@@ -152,7 +173,21 @@ class DecisionEngine:
             fii = state["fii_positioning"]
             gamma = state["gamma_analysis"]
             liquidity_sweep = state["liquidity_sweep"]
+            global_market = state["global_market"]
+            macro_calendar = state["macro_calendar"]
             context = state["market_context"]
+            global_sentiment = self.global_sentiment_engine.combine(
+                global_market=global_market,
+                macro_calendar=macro_calendar,
+                news_impact=NewsImpactAnalysis(
+                    macro_bias=news.macro_bias,
+                    impact_level=news.impact_level,
+                    confidence=news.confidence,
+                    impact_score=float(news.article_count),
+                    top_headlines=[headline.get("title", "") for headline in (news.top_headlines or [])],
+                ),
+            )
+            state["global_sentiment"] = global_sentiment
 
             signal = self.trigger_agent.generate_signal(
                 chart=chart,
@@ -164,6 +199,9 @@ class DecisionEngine:
                 fii=fii,
                 gamma=gamma,
                 liquidity_sweep=liquidity_sweep,
+                global_market=global_market,
+                macro_calendar=macro_calendar,
+                global_sentiment=global_sentiment,
                 spot=context.spot_price,
                 market_context=context,
             )
@@ -174,6 +212,7 @@ class DecisionEngine:
                 "option_chain_confirmation": 0,
                 "regime_confirmation": 0,
                 "fii_positioning": 0,
+                "global_sentiment": 0,
                 "gamma_signal": 0,
                 "liquidity_validation": 0,
             }
@@ -190,6 +229,13 @@ class DecisionEngine:
                 and fii.confidence >= 0.55
             ):
                 score_breakdown["fii_positioning"] = 2
+            signal_bias = "bullish" if signal.signal == "BUY_CE" else "bearish" if signal.signal == "BUY_PE" else "neutral"
+            if (
+                signal_bias != "neutral"
+                and global_sentiment.market_sentiment == signal_bias
+                and global_sentiment.confidence >= 0.55
+            ):
+                score_breakdown["global_sentiment"] = 2
             if context.quality.option_chain_available and gamma.gamma_regime == "negative_gamma":
                 score_breakdown["gamma_signal"] = 1
             if (
@@ -274,6 +320,9 @@ class DecisionEngine:
             "fii_positioning": getattr(state["fii_positioning"], "__dict__", state["fii_positioning"]),
             "gamma_analysis": getattr(state["gamma_analysis"], "__dict__", state["gamma_analysis"]),
             "liquidity_sweep": getattr(state["liquidity_sweep"], "__dict__", state["liquidity_sweep"]),
+            "global_market": getattr(state["global_market"], "__dict__", state["global_market"]),
+            "macro_calendar": getattr(state["macro_calendar"], "__dict__", state["macro_calendar"]),
+            "global_sentiment": getattr(state["global_sentiment"], "__dict__", state["global_sentiment"]),
             "decision_score": decision_score,
             "score_complete": score_complete,
             "data_quality": state["market_context"].quality.to_dict(),
@@ -318,6 +367,10 @@ class DecisionEngine:
                 liquidity=state["liquidity"].liquidity,
                 volatility=state["vol"].volatility,
                 news_risk=state["news"].risk_level,
+                macro_event_risk=state["macro_calendar"].event_risk,
+                global_risk_sentiment=state["global_market"].risk_sentiment
+                if state["global_market"].confidence >= 0.8
+                else "neutral",
             )
             if not risk.allowed:
                 signal = TradeSignal(

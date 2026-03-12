@@ -54,7 +54,7 @@ class TokenManager:
 
     @property
     def redirect_url(self) -> str:
-        return settings.kite_redirect_url or os.getenv("KITE_REDIRECT_URL") or "http://localhost:8000/callback"
+        return os.getenv("KITE_REDIRECT_URL") or settings.kite_redirect_url or "http://localhost:8000/callback"
 
     def _build_kite(self, access_token: str | None = None) -> KiteConnect:
         if not self.api_key:

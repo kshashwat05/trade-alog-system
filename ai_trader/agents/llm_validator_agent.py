@@ -37,6 +37,10 @@ class _LlmStructuredResponse(BaseModel):
 
 
 class LlmValidatorAgent:
+    DEFAULT_MODELS: dict[LlmProvider, str] = {
+        "openai": "gpt-4.1-mini",
+        "gemini": "gemini-2.0-flash",
+    }
     RESPONSE_SCHEMA: dict[str, Any] = {
         "name": "llm_signal_validation",
         "schema": {
@@ -76,7 +80,14 @@ class LlmValidatorAgent:
         self.provider: LlmProvider = ("openai" if (provider or settings.llm_provider).lower() == "openai" else "gemini")
         default_api_key = settings.openai_api_key if self.provider == "openai" else settings.gemini_api_key
         self.api_key = api_key or default_api_key
-        self.model = model or settings.llm_model
+        configured_model = settings.llm_model
+        provider_default = self.DEFAULT_MODELS[self.provider]
+        if model is not None:
+            self.model = model
+        elif configured_model and settings.llm_provider.lower() == self.provider:
+            self.model = configured_model
+        else:
+            self.model = provider_default
         self.validation_enabled = (
             settings.llm_validation_enabled if validation_enabled is None else validation_enabled
         )
