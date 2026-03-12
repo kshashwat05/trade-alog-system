@@ -237,7 +237,7 @@ def test_llm_validator_uses_output_text_and_missing_client_fallback():
 
         chat = Chat()
 
-    validator = LlmValidatorAgent(validation_enabled=True, api_key="x", client=DummyClient())
+    validator = LlmValidatorAgent(validation_enabled=True, provider="openai", api_key="x", client=DummyClient())
     result = validator.validate({"signal": "BUY_CE"})
     assert result.validation == "approved"
     assert result.source == "openai"
@@ -245,6 +245,31 @@ def test_llm_validator_uses_output_text_and_missing_client_fallback():
     fallback = LlmValidatorAgent(validation_enabled=True, api_key=None, client=None).validate({"signal": "BUY_CE"})
     assert fallback.validation == "approved"
     assert fallback.fallback_used is True
+
+
+def test_llm_validator_gemini_falls_back_for_invalid_response():
+    class InvalidGeminiResponse:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {"candidates": [{"content": {"parts": [{"text": '{"validation":"approved"}'}]}}]}
+
+    class InvalidGeminiClient:
+        @staticmethod
+        def post(url, json=None, timeout=8.0):
+            return InvalidGeminiResponse()
+
+    result = LlmValidatorAgent(
+        validation_enabled=True,
+        provider="gemini",
+        api_key="gemini-key",
+        client=InvalidGeminiClient(),
+    ).validate({"signal": "BUY_CE"})
+    assert result.source == "deterministic_fallback"
+    assert result.fallback_used is True
 
 
 def test_llm_validator_falls_back_for_invalid_payload_and_unstructured_response():
@@ -464,6 +489,7 @@ def test_whatsapp_alerter_handles_none_signal_and_delivery_failures(monkeypatch)
     monkeypatch.setattr(settings, "twilio_auth_token", None)
     monkeypatch.setattr(settings, "twilio_whatsapp_from", None)
     monkeypatch.setattr(settings, "whatsapp_to", None)
+    monkeypatch.setattr(settings, "twilio_content_sid", None)
     alerter = WhatsAppAlerter()
     alerter.send_trade_signal(TradeSignal("NONE", 0.0, 0.0, 0.0, 0.0, "none"))
     alerter.send_exit_alert("exit")
@@ -483,6 +509,7 @@ def test_whatsapp_alerter_handles_none_signal_and_delivery_failures(monkeypatch)
     monkeypatch.setattr(settings, "twilio_auth_token", "token")
     monkeypatch.setattr(settings, "twilio_whatsapp_from", "whatsapp:+111")
     monkeypatch.setattr(settings, "whatsapp_to", "whatsapp:+222")
+    monkeypatch.setattr(settings, "twilio_content_sid", None)
     monkeypatch.setattr("ai_trader.alerts.whatsapp_alert.Client", lambda sid, token: DummyClient())
     monkeypatch.setattr("ai_trader.alerts.whatsapp_alert.TwilioRestException", Exception)
 
@@ -494,6 +521,61 @@ def test_whatsapp_alerter_handles_none_signal_and_delivery_failures(monkeypatch)
     )
     live.send_exit_alert("NIFTY TRADE EXIT")
     assert any("NIFTY TRADE SIGNAL" in body for body in sent_bodies)
+
+
+def test_whatsapp_alerter_uses_content_sid_when_configured(monkeypatch):
+    sent_payloads: list[dict[str, object]] = []
+
+    class DummyMessages:
+        def create(self, **kwargs):
+            sent_payloads.append(kwargs)
+
+    class DummyClient:
+        messages = DummyMessages()
+
+    monkeypatch.setattr(settings, "twilio_account_sid", "sid")
+    monkeypatch.setattr(settings, "twilio_auth_token", "token")
+    monkeypatch.setattr(settings, "twilio_whatsapp_from", "whatsapp:+14155238886")
+    monkeypatch.setattr(settings, "whatsapp_to", "whatsapp:+919899345766")
+    monkeypatch.setattr(settings, "twilio_trade_content_sid", "HXtemplate")
+    monkeypatch.setattr("ai_trader.alerts.whatsapp_alert.Client", lambda sid, token: DummyClient())
+
+    alerter = WhatsAppAlerter()
+    alerter.send_trade_signal(
+        TradeSignal("BUY_PE", 210.0, 175.0, 280.0, 0.78, "Trend-down regime confirmed."),
+        institutional_bias="bearish",
+        gamma_regime="negative_gamma",
+    )
+    assert sent_payloads
+    assert sent_payloads[0]["content_sid"] == "HXtemplate"
+    assert "content_variables" in sent_payloads[0]
+
+
+def test_whatsapp_alerter_sends_generic_template_message(monkeypatch):
+    sent_payloads: list[dict[str, object]] = []
+
+    class DummyMessage:
+        sid = "SM123"
+
+    class DummyMessages:
+        def create(self, **kwargs):
+            sent_payloads.append(kwargs)
+            return DummyMessage()
+
+    class DummyClient:
+        messages = DummyMessages()
+
+    monkeypatch.setattr(settings, "twilio_account_sid", "sid")
+    monkeypatch.setattr(settings, "twilio_auth_token", "token")
+    monkeypatch.setattr(settings, "twilio_whatsapp_from", "whatsapp:+14155238886")
+    monkeypatch.setattr(settings, "whatsapp_to", "whatsapp:+919899345766")
+    monkeypatch.setattr(settings, "twilio_content_sid", "HXappointment")
+    monkeypatch.setattr("ai_trader.alerts.whatsapp_alert.Client", lambda sid, token: DummyClient())
+
+    alerter = WhatsAppAlerter()
+    sid = alerter.send_template_message(content_variables={"1": "12/1", "2": "3pm"})
+    assert sid == "SM123"
+    assert sent_payloads[0]["content_sid"] == "HXappointment"
 
 
 def test_kite_client_helpers_cover_resolution_and_error_paths():

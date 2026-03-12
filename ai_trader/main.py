@@ -12,11 +12,13 @@ from loguru import logger
 
 from ai_trader.agents.position_monitor_agent import PositionMonitorAgent
 from ai_trader.alerts.whatsapp_alert import WhatsAppAlerter
+from ai_trader.auth.token_manager import get_authenticated_kite_client
 from ai_trader.config.settings import settings
 from ai_trader.data.kite_client import KiteClient
 from ai_trader.data.trade_journal import TradeJournal
 from ai_trader.orchestrator.decision_engine import DecisionEngine
 from ai_trader.simulation.missed_trade_analyzer import MissedTradeAnalyzer
+from kiteconnect import KiteConnect
 
 
 engine = DecisionEngine()
@@ -76,6 +78,20 @@ def _hydrate_risk_state_from_journal() -> None:
 _hydrate_risk_state_from_journal()
 
 
+def configure_authenticated_runtime(kite: KiteConnect) -> KiteClient:
+    authenticated_client = KiteClient(kite=kite)
+    engine.chart_agent.client = authenticated_client
+    engine.regime_agent.client = authenticated_client
+    engine.market_data_provider.kite_client = authenticated_client
+    engine.market_data_provider._cached_context = None
+    engine.market_data_provider._cached_at = None
+    missed_trade_analyzer.client = authenticated_client
+    global _price_client
+    _price_client = authenticated_client
+    logger.info("Injected authenticated Kite client into runtime components.")
+    return authenticated_client
+
+
 def _persist_runtime_health() -> None:
     stats = journal.get_runtime_stats()
     payload = {
@@ -90,7 +106,8 @@ def _persist_runtime_health() -> None:
 
 def run_startup_preflight() -> dict[str, object]:
     checks: dict[str, object] = {
-        "kite_configured": bool(settings.kite_api_key and settings.kite_access_token),
+        "kite_configured": bool(settings.kite_api_key and settings.kite_api_secret and settings.kite_redirect_url),
+        "kite_access_token_present": bool(settings.kite_access_token),
         "twilio_configured": bool(
             settings.twilio_account_sid
             and settings.twilio_auth_token
@@ -99,7 +116,11 @@ def run_startup_preflight() -> dict[str, object]:
         ),
         "news_configured": bool(settings.news_api_key),
         "llm_configured": (not settings.llm_validation_enabled)
-        or bool(settings.openai_api_key),
+        or (
+            bool(settings.openai_api_key)
+            if settings.llm_provider.lower() == "openai"
+            else bool(settings.gemini_api_key)
+        ),
         "journal_writable": True,
         "live_state_writable": True,
         "runtime_health_writable": True,
@@ -127,13 +148,14 @@ def run_startup_preflight() -> dict[str, object]:
             checks[key] = False
             checks["errors"].append(f"{key}: {exc}")  # type: ignore[index]
     if not checks["kite_configured"]:
-        checks["warnings"].append("Kite credentials missing; engine will degrade to non-live market data.")  # type: ignore[index]
+        checks["warnings"].append("Kite API credentials missing; automatic broker authentication is unavailable.")  # type: ignore[index]
     if not checks["twilio_configured"]:
         checks["warnings"].append("Twilio credentials incomplete; alerts will run in mock mode.")  # type: ignore[index]
     if not checks["news_configured"]:
         checks["warnings"].append("News API key missing; news gating will mark context unavailable.")  # type: ignore[index]
     if settings.llm_validation_enabled and not checks["llm_configured"]:
-        checks["errors"].append("LLM validation enabled but OPENAI_API_KEY is missing.")  # type: ignore[index]
+        missing_key_name = "OPENAI_API_KEY" if settings.llm_provider.lower() == "openai" else "GEMINI_API_KEY"
+        checks["errors"].append(f"LLM validation enabled but {missing_key_name} is missing.")  # type: ignore[index]
     _runtime_health["startup_checks"] = checks
     _persist_runtime_health()
     if settings.strict_startup_checks and checks["errors"]:  # type: ignore[index]
@@ -340,6 +362,18 @@ def main() -> None:
     preflight = run_startup_preflight()
     logger.info("Starting AI Trader main loop.")
     logger.info(f"Startup preflight: {preflight}")
+    if preflight["kite_configured"]:
+        try:
+            configure_authenticated_runtime(get_authenticated_kite_client(auto_login=True))
+            _runtime_health["startup_checks"]["kite_session_valid"] = True  # type: ignore[index]
+            _runtime_health["last_error"] = None
+            _persist_runtime_health()
+        except Exception as exc:  # noqa: BLE001
+            _runtime_health["startup_checks"]["kite_session_valid"] = False  # type: ignore[index]
+            _runtime_health["startup_checks"]["errors"].append(f"kite_authentication_failed: {exc}")  # type: ignore[index]
+            _runtime_health["last_error"] = f"kite_authentication_failed: {exc}"
+            _persist_runtime_health()
+            raise SystemExit(f"Kite authentication failed: {exc}")
 
     # Run immediately once, then every 2 minutes
     run_trading_cycle()

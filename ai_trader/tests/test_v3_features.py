@@ -121,6 +121,7 @@ def test_llm_validator_uses_openai_structured_response():
 
     validator = LlmValidatorAgent(
         validation_enabled=True,
+        provider="openai",
         api_key="test-key",
         client=DummyClient(),
     )
@@ -153,6 +154,7 @@ def test_llm_validator_falls_back_to_deterministic_logic_on_api_failure():
 
     validator = LlmValidatorAgent(
         validation_enabled=True,
+        provider="openai",
         api_key="test-key",
         client=FailingClient(),
     )
@@ -177,6 +179,44 @@ def test_llm_validator_disabled_uses_deterministic_signal():
     result = validator.validate({"signal": "BUY_PE"})
     assert result.validation == "approved"
     assert result.source == "deterministic_fallback"
+
+
+def test_llm_validator_uses_gemini_structured_response():
+    class DummyGeminiResponse:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": '{"validation":"approved","confidence_adjustment":0.05,"reasoning":"Institutional alignment confirmed."}'
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+
+    class DummyGeminiClient:
+        @staticmethod
+        def post(url, json=None, timeout=8.0):
+            return DummyGeminiResponse()
+
+    validator = LlmValidatorAgent(
+        validation_enabled=True,
+        provider="gemini",
+        api_key="gemini-key",
+        client=DummyGeminiClient(),
+    )
+    result = validator.validate({"signal": "BUY_CE", "decision_score": 8})
+    assert result.validation == "approved"
+    assert result.source == "gemini"
 
 
 def test_news_agent_marks_missing_articles_as_unavailable():

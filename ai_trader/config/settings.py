@@ -32,11 +32,16 @@ class Settings(BaseSettings):
     kite_api_key: Optional[str] = Field(default=None, repr=False)
     kite_api_secret: Optional[str] = Field(default=None, repr=False)
     kite_access_token: Optional[str] = Field(default=None, repr=False)
+    kite_last_login: Optional[str] = None
+    kite_redirect_url: str = "http://localhost:8000/callback"
+    kite_auth_timeout_seconds: int = 300
     kite_instrument_token: Optional[int] = None
 
     news_api_key: Optional[str] = Field(default=None, repr=False)
     openai_api_key: Optional[str] = Field(default=None, repr=False)
-    llm_model: str = "gpt-4.1-mini"
+    gemini_api_key: Optional[str] = Field(default=None, repr=False)
+    llm_provider: str = "gemini"
+    llm_model: str = "gemini-2.0-flash"
     llm_validation_enabled: bool = False
     market_data_cache_seconds: int = 20
     max_price_candle_age_seconds: int = 900
@@ -48,6 +53,8 @@ class Settings(BaseSettings):
     twilio_auth_token: Optional[str] = Field(default=None, repr=False)
     twilio_whatsapp_from: Optional[str] = Field(default=None, repr=False)
     whatsapp_to: Optional[str] = Field(default=None, repr=False)
+    twilio_content_sid: Optional[str] = Field(default=None, repr=False)
+    twilio_trade_content_sid: Optional[str] = Field(default=None, repr=False)
 
     # Backtesting
     backtest_data_path: str = "ai_trader/tests/mock_data/nifty_intraday.csv"
