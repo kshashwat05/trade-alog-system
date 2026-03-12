@@ -1,0 +1,16 @@
+kiteconnect
+pandas
+numpy
+ta
+requests
+websocket-client
+langgraph
+crewai
+pytest
+pydantic
+pydantic-settings
+python-dotenv
+schedule
+loguru
+twilio
+PyYAML==6.0.3
