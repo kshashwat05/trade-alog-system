@@ -13,7 +13,10 @@ from ai_trader.agents.regime_agent import RegimeAnalysis
 from ai_trader.agents.liquidity_agent import LiquidityAnalysis
 from ai_trader.agents.fii_positioning_agent import FiiPositioningAnalysis
 from ai_trader.agents.gamma_agent import GammaAnalysis
+from ai_trader.agents.global_market_agent import GlobalMarketAnalysis
 from ai_trader.agents.liquidity_sweep_agent import LiquiditySweepAnalysis
+from ai_trader.agents.macro_calendar_agent import MacroCalendarAnalysis
+from ai_trader.analysis.global_sentiment_engine import GlobalSentimentAnalysis
 if TYPE_CHECKING:
     from ai_trader.data.market_data_context import MarketDataContext
 
@@ -105,6 +108,9 @@ class TradeTriggerAgent:
         fii: FiiPositioningAnalysis,
         gamma: GammaAnalysis,
         liquidity_sweep: LiquiditySweepAnalysis,
+        global_market: GlobalMarketAnalysis | None = None,
+        macro_calendar: MacroCalendarAnalysis | None = None,
+        global_sentiment: GlobalSentimentAnalysis | None = None,
         spot: Optional[float] = None,
         market_context: MarketDataContext | None = None,
     ) -> TradeSignal:
@@ -123,6 +129,23 @@ class TradeTriggerAgent:
                 rationale="Invalid spot price.",
                 underlying_spot=spot,
             )
+
+        global_market = global_market or GlobalMarketAnalysis(
+            global_bias="neutral",
+            risk_sentiment="neutral",
+            confidence=0.0,
+        )
+        macro_calendar = macro_calendar or MacroCalendarAnalysis(
+            event_risk="low",
+            event_type="none",
+            expected_market_impact="neutral",
+        )
+        global_sentiment = global_sentiment or GlobalSentimentAnalysis(
+            market_sentiment="neutral",
+            confidence=0.0,
+            risk_blocked=False,
+            rationale="No global sentiment data.",
+        )
 
         base_signal: SignalType = "NONE"
         confidence = 0.0
@@ -171,6 +194,58 @@ class TradeTriggerAgent:
             logger.info(f"TradeTriggerAgent signal: {signal}")
             return signal
 
+        if macro_calendar.event_risk == "high":
+            signal = TradeSignal(
+                signal="NONE",
+                entry=spot,
+                stop_loss=spot,
+                target=spot,
+                confidence=0.0,
+                rationale=f"High macro event risk from {macro_calendar.event_type}; skipping setup.",
+                underlying_spot=spot,
+            )
+            logger.info(f"TradeTriggerAgent signal: {signal}")
+            return signal
+
+        if global_sentiment.risk_blocked:
+            signal = TradeSignal(
+                signal="NONE",
+                entry=spot,
+                stop_loss=spot,
+                target=spot,
+                confidence=0.0,
+                rationale=f"Global risk filter active: {global_sentiment.rationale}.",
+                underlying_spot=spot,
+            )
+            logger.info(f"TradeTriggerAgent signal: {signal}")
+            return signal
+
+        if base_signal == "BUY_PE" and global_sentiment.market_sentiment == "bullish":
+            signal = TradeSignal(
+                signal="NONE",
+                entry=spot,
+                stop_loss=spot,
+                target=spot,
+                confidence=0.0,
+                rationale="Global sentiment is bullish and conflicts with a bearish entry.",
+                underlying_spot=spot,
+            )
+            logger.info(f"TradeTriggerAgent signal: {signal}")
+            return signal
+
+        if base_signal == "BUY_CE" and global_sentiment.market_sentiment == "bearish":
+            signal = TradeSignal(
+                signal="NONE",
+                entry=spot,
+                stop_loss=spot,
+                target=spot,
+                confidence=0.0,
+                rationale="Global sentiment is bearish and conflicts with a bullish entry.",
+                underlying_spot=spot,
+            )
+            logger.info(f"TradeTriggerAgent signal: {signal}")
+            return signal
+
         expected_news_bias = directional_bias[base_signal]
         if news.macro_bias not in ("neutral", expected_news_bias):
             signal = TradeSignal(
@@ -208,6 +283,7 @@ class TradeTriggerAgent:
         conf += 0.15 * fii.confidence
         conf += 0.05 * (1.0 if gamma.gamma_regime == "negative_gamma" else 0.2)
         conf += 0.1 * (1.0 if not liquidity_sweep.liquidity_event else 0.4)
+        conf += 0.1 * global_sentiment.confidence
         confidence = float(max(0.0, min(1.0, conf)))
         if confidence < self.MIN_CONFIDENCE:
             signal = TradeSignal(

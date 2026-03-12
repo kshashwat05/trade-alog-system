@@ -528,6 +528,7 @@ def test_startup_preflight_persists_runtime_health(monkeypatch, tmp_path):
     monkeypatch.setattr(main_module, "_runtime_health_path", runtime_health_path)
     monkeypatch.setattr(main_module, "_live_state_path", live_state_path)
     monkeypatch.setattr(main_module.settings, "llm_validation_enabled", True)
+    monkeypatch.setattr(main_module.settings, "llm_provider", "openai")
     monkeypatch.setattr(main_module.settings, "openai_api_key", None)
     monkeypatch.setattr(main_module.settings, "strict_startup_checks", False)
 
