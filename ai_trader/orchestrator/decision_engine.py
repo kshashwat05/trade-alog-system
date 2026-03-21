@@ -361,7 +361,7 @@ class DecisionEngine:
         if signal.signal == "NONE":
             risk = RiskCheckResult(allowed=False, reason="No trade signal after validation.")
         else:
-            risk = self.risk_agent.authorize_signal(
+            risk = self.risk_agent.check(
                 signal,
                 open_trades=state.get("open_trades", 0),
                 liquidity=state["liquidity"].liquidity,
