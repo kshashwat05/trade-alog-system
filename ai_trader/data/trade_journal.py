@@ -34,6 +34,7 @@ class TradeJournalEntry:
     trade_executed: bool
     execution_price: float | None
     exit_price: float | None
+    closed_at: str | None
     pnl: float | None
     quantity: int | None
     status: str
@@ -77,6 +78,7 @@ class TradeJournal:
                     trade_executed INTEGER NOT NULL DEFAULT 0,
                     execution_price REAL,
                     exit_price REAL,
+                    closed_at TEXT,
                     pnl REAL,
                     quantity INTEGER,
                     status TEXT NOT NULL,
@@ -98,6 +100,7 @@ class TradeJournal:
             self._ensure_column("institutional_bias", "TEXT")
             self._ensure_column("gamma_regime", "TEXT")
             self._ensure_column("liquidity_event", "TEXT")
+            self._ensure_column("closed_at", "TEXT")
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp)"
             )
@@ -127,6 +130,7 @@ class TradeJournal:
             trade_executed=bool(row["trade_executed"]),
             execution_price=row["execution_price"],
             exit_price=row["exit_price"],
+            closed_at=row["closed_at"],
             pnl=row["pnl"],
             quantity=row["quantity"],
             status=str(row["status"]),
@@ -313,10 +317,10 @@ class TradeJournal:
             cursor = self._conn.execute(
                 """
                 UPDATE trades
-                SET status = ?, exit_price = ?, pnl = ?
+                SET status = ?, exit_price = ?, closed_at = ?, pnl = ?
                 WHERE id = ? AND status = ?
                 """,
-                (status, exit_price, pnl, signal_id, STATUS_EXECUTED),
+                (status, exit_price, datetime.utcnow().isoformat(), pnl, signal_id, STATUS_EXECUTED),
             )
             self._conn.commit()
             if cursor.rowcount == 0:

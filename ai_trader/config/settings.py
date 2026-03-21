@@ -72,6 +72,28 @@ class Settings(BaseSettings):
     replay_reports_path: str = "ai_trader/data/replay_reports"
     strict_startup_checks: bool = False
 
+    # Execution intelligence and position awareness feature flags
+    execution_intelligence_enabled: bool = False
+    exit_intelligence_enabled: bool = False
+    data_quality_guard_enabled: bool = False
+    position_tracker_enabled: bool = False
+    kill_switch_enabled: bool = False
+
+    # Execution intelligence tuning
+    consolidation_lookback_candles: int = 12
+    consolidation_range_threshold_pct: float = 0.35
+    extension_ema_period: int = 20
+    extension_threshold_pct: float = 0.8
+
+    # Exit intelligence tuning
+    exit_intel_window_points: int = 6
+    exit_intel_stagnation_threshold_pct: float = 4.0
+    exit_intel_momentum_lookback: int = 3
+    exit_intel_advisory_cooldown_seconds: int = 300
+
+    # Kill switch tuning
+    kill_switch_consecutive_losses: int = 2
+
     model_config = SettingsConfigDict(
         env_prefix="",
         env_file=".env",

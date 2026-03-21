@@ -11,6 +11,11 @@ import schedule
 from loguru import logger
 
 from ai_trader.agents.position_monitor_agent import PositionMonitorAgent
+from ai_trader.agents.data_quality_guard import DataQualityGuard
+from ai_trader.agents.execution_intelligence_agent import ExecutionIntelligenceAgent
+from ai_trader.agents.exit_intelligence_agent import ExitIntelligenceAgent, ExitIntelligenceSuggestion
+from ai_trader.agents.kill_switch_agent import KillSwitchAgent
+from ai_trader.agents.position_tracker import PositionTracker
 from ai_trader.alerts.whatsapp_alert import WhatsAppAlerter
 from ai_trader.auth.token_manager import get_authenticated_kite_client
 from ai_trader.config.settings import settings
@@ -30,6 +35,11 @@ _live_state_path.parent.mkdir(parents=True, exist_ok=True)
 _runtime_health_path = Path(settings.runtime_health_path)
 _runtime_health_path.parent.mkdir(parents=True, exist_ok=True)
 _price_client = KiteClient()
+data_quality_guard = DataQualityGuard()
+execution_intelligence = ExecutionIntelligenceAgent()
+exit_intelligence = ExitIntelligenceAgent()
+kill_switch = KillSwitchAgent()
+position_tracker = PositionTracker()
 _runtime_health: dict[str, object] = {
     "service_started_at": datetime.utcnow().isoformat(),
     "last_cycle_started_at": None,
@@ -42,6 +52,10 @@ _runtime_health: dict[str, object] = {
     "missed_trade_failures": 0,
     "trade_alert_failures": 0,
     "exit_alert_failures": 0,
+    "execution_intelligence_blocks": 0,
+    "data_quality_blocks": 0,
+    "kill_switch_blocks": 0,
+    "position_mismatch_count": 0,
     "startup_checks": {},
 }
 
@@ -58,7 +72,18 @@ def _fetch_trade_price_from_signal(trade) -> float | None:
         return None
 
 
-position_monitor = PositionMonitorAgent(journal=journal, price_fetcher=_fetch_trade_price_from_signal)
+def _exit_intelligence_callback(trade, current_price: float) -> ExitIntelligenceSuggestion:
+    if not settings.exit_intelligence_enabled:
+        return ExitIntelligenceSuggestion(action="NONE", reason="Exit intelligence disabled.", confidence=0.0)
+    return exit_intelligence.observe_trade(trade, current_price)
+
+
+position_monitor = PositionMonitorAgent(
+    journal=journal,
+    price_fetcher=_fetch_trade_price_from_signal,
+    exit_intelligence_cb=_exit_intelligence_callback if settings.exit_intelligence_enabled else None,
+    exit_cleanup_cb=exit_intelligence.clear_trade if settings.exit_intelligence_enabled else None,
+)
 missed_trade_analyzer = MissedTradeAnalyzer(journal=journal)
 
 
@@ -187,6 +212,8 @@ def is_market_open(now: datetime | None = None) -> bool:
 
 
 def persist_live_state(result) -> None:
+    market_context = result.state.get("market_context")
+    market_quality = getattr(market_context, "quality", None)
     signal_payload = {
         "signal": result.signal.signal,
         "entry": result.signal.entry,
@@ -212,9 +239,7 @@ def persist_live_state(result) -> None:
         "score_breakdown": result.state.get("score_breakdown", {}),
         "score_complete": result.state.get("score_complete", False),
         "agent_health": result.state.get("agent_health", {}),
-        "market_data_quality": getattr(result.state.get("market_context"), "quality", None).__dict__
-        if result.state.get("market_context") is not None
-        else {},
+        "market_data_quality": getattr(market_quality, "__dict__", {}),
         "cycle_runtime_health": {
             "last_cycle_started_at": _runtime_health.get("last_cycle_started_at"),
             "last_cycle_completed_at": _runtime_health.get("last_cycle_completed_at"),
@@ -254,12 +279,80 @@ def _run_trading_cycle() -> None:
         logger.error(f"Trading cycle failed: {exc}")
         return
 
+    if result.signal.signal != "NONE" and result.risk.allowed:
+        if settings.data_quality_guard_enabled:
+            dq_decision = data_quality_guard.evaluate(
+                result.signal,
+                result.state.get("market_context"),
+                score_complete=bool(result.state.get("score_complete", False)),
+            )
+            if not dq_decision.allowed:
+                _runtime_health["data_quality_blocks"] = int(_runtime_health.get("data_quality_blocks", 0)) + 1
+                result.risk.allowed = False
+                result.risk.reason = dq_decision.reason
+                result.signal.signal = "NONE"
+                result.signal.rationale = dq_decision.reason
+                result.signal.confidence = 0.0
+
+    if result.signal.signal != "NONE" and result.risk.allowed:
+        if settings.execution_intelligence_enabled:
+            exec_decision = execution_intelligence.evaluate(
+                result.signal,
+                result.state.get("market_context"),
+            )
+            if not exec_decision.allowed:
+                _runtime_health["execution_intelligence_blocks"] = int(
+                    _runtime_health.get("execution_intelligence_blocks", 0)
+                ) + 1
+                result.risk.allowed = False
+                result.risk.reason = exec_decision.reason
+                result.signal.signal = "NONE"
+                result.signal.rationale = exec_decision.reason
+                result.signal.confidence = 0.0
+
+    if result.signal.signal != "NONE" and result.risk.allowed:
+        if settings.kill_switch_enabled:
+            kill_decision = kill_switch.evaluate(journal)
+            if kill_decision.blocked:
+                _runtime_health["kill_switch_blocks"] = int(_runtime_health.get("kill_switch_blocks", 0)) + 1
+                result.risk.allowed = False
+                result.risk.reason = kill_decision.reason
+                result.signal.signal = "NONE"
+                result.signal.rationale = kill_decision.reason
+                result.signal.confidence = 0.0
+
+    if result.signal.signal != "NONE" and result.risk.allowed:
+        liquidity_state = result.state.get("liquidity")
+        vol_state = result.state.get("vol")
+        news_state = result.state.get("news")
+        macro_state = result.state.get("macro_calendar")
+        global_state = result.state.get("global_market")
+        authorization = engine.risk_agent.authorize_signal(
+            result.signal,
+            open_trades=len(journal.get_open_trades()),
+            liquidity=getattr(liquidity_state, "liquidity", "medium"),
+            volatility=getattr(vol_state, "volatility", "medium"),
+            news_risk=getattr(news_state, "risk_level", "medium"),
+            macro_event_risk=getattr(macro_state, "event_risk", "low"),
+            global_risk_sentiment=getattr(global_state, "risk_sentiment", "neutral")
+            if getattr(global_state, "confidence", 0.0) >= 0.8
+            else "neutral",
+        )
+        if not authorization.allowed:
+            result.risk.allowed = False
+            result.risk.reason = authorization.reason
+            result.signal.signal = "NONE"
+            result.signal.rationale = authorization.reason or "Rejected by risk manager."
+            result.signal.confidence = 0.0
+
     persist_live_state(result)
     _runtime_health["last_cycle_completed_at"] = datetime.utcnow().isoformat()
     _runtime_health["last_error"] = None
 
     trade_id: int | None = None
-    if result.signal.signal != "NONE":
+    if result.signal.signal != "NONE" and result.risk.allowed:
+        market_context = result.state.get("market_context")
+        market_quality = getattr(market_context, "quality", None)
         try:
             trade_id = journal.record_signal(
                 timestamp=datetime.fromisoformat(result.timestamp),
@@ -286,9 +379,7 @@ def _run_trading_cycle() -> None:
                     "score_breakdown": result.state.get("score_breakdown", {}),
                     "score_complete": result.state.get("score_complete", False),
                     "agent_health": result.state.get("agent_health", {}),
-                    "market_data_quality": getattr(result.state.get("market_context"), "quality", None).__dict__
-                    if result.state.get("market_context") is not None
-                    else {},
+                    "market_data_quality": getattr(market_quality, "__dict__", {}),
                     "source_timestamp": result.timestamp,
                     "llm_validation_source": result.llm_validation.source,
                     "llm_validation_fallback": result.llm_validation.fallback_used,
@@ -304,17 +395,28 @@ def _run_trading_cycle() -> None:
             result.risk.reason = str(exc)
 
     if result.signal.signal != "NONE" and result.risk.allowed:
+        alert_sent = False
         try:
             alerter.send_trade_signal(
                 result.signal,
                 institutional_bias=getattr(result.state["fii_positioning"], "fii_bias", None),
                 gamma_regime=getattr(result.state["gamma_analysis"], "gamma_regime", None),
             )
+            alert_sent = True
         except Exception as exc:  # noqa: BLE001
             _runtime_health["trade_alert_failures"] = int(_runtime_health.get("trade_alert_failures", 0)) + 1
             _runtime_health["last_error"] = f"trade_alert_failed: {exc}"
             logger.error(f"Trade alert delivery failed: {exc}")
-        logger.info(f"Actionable signal sent and recorded with trade_id={trade_id}.")
+        if settings.position_tracker_enabled and alert_sent:
+            position_tracker.record_alert_delivery(journal, trade_id)
+            sync_report = position_tracker.sync_with_journal(journal)
+            _runtime_health["position_mismatch_count"] = sync_report.mismatches
+            if sync_report.mismatches > 0:
+                logger.warning(f"PositionTracker mismatch details: {sync_report.details}")
+        if alert_sent:
+            logger.info(f"Actionable signal sent and recorded with trade_id={trade_id}.")
+        else:
+            logger.warning(f"Trade recorded without alert delivery trade_id={trade_id}.")
     else:
         logger.info(
             f"No actionable signal. decision_score={result.decision_score}, "
@@ -340,10 +442,29 @@ def run_position_monitor_cycle() -> None:
     for exit_result in exits:
         try:
             alerter.send_exit_alert(exit_result.message)
+            if exit_result.advisory_only:
+                if exit_result.exit_suggestion is not None:
+                    exit_intelligence.mark_advisory_sent(exit_result.signal_id, exit_result.exit_suggestion)
+                journal.merge_metadata(
+                    exit_result.signal_id,
+                    {
+                        "exit_intelligence": {
+                            "action": exit_result.status,
+                            "reason": exit_result.exit_suggestion.reason if exit_result.exit_suggestion else None,
+                            "confidence": (
+                                exit_result.exit_suggestion.confidence if exit_result.exit_suggestion else None
+                            ),
+                            "sent_at": datetime.utcnow().isoformat(),
+                        }
+                    },
+                )
         except Exception as exc:  # noqa: BLE001
             _runtime_health["exit_alert_failures"] = int(_runtime_health.get("exit_alert_failures", 0)) + 1
             _runtime_health["last_error"] = f"exit_alert_failed: {exc}"
             logger.error(f"Exit alert delivery failed for trade_id={exit_result.signal_id}: {exc}")
+    if settings.position_tracker_enabled:
+        sync_report = position_tracker.sync_with_journal(journal)
+        _runtime_health["position_mismatch_count"] = sync_report.mismatches
     _runtime_health["last_monitor_completed_at"] = datetime.utcnow().isoformat()
     _persist_runtime_health()
 

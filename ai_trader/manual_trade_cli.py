@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 from ai_trader.config.settings import settings
+from ai_trader.agents.position_tracker import PositionTracker
 from ai_trader.data.kite_client import KiteClient
 from ai_trader.data.trade_journal import TradeJournal
 
@@ -24,6 +25,7 @@ def main() -> None:
 
     args = parser.parse_args()
     journal = TradeJournal(settings.trade_journal_path)
+    tracker = PositionTracker()
     kite_client = KiteClient()
     if args.command == "record_trade":
         instrument_key = args.instrument_key
@@ -37,6 +39,10 @@ def main() -> None:
             args.lots,
             instrument_key=instrument_key,
         )
+        if settings.position_tracker_enabled:
+            report = tracker.sync_with_journal(journal)
+            if report.mismatches:
+                print(f"Position mismatches detected: {report.details}")
         print(f"Recorded executed trade for signal_id={args.signal_id}")
     elif args.command == "mark_missed":
         journal.mark_trade_missed(args.signal_id)
