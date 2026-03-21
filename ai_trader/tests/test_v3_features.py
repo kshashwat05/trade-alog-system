@@ -9,6 +9,7 @@ from ai_trader.agents.gamma_agent import GammaAgent
 from ai_trader.agents.liquidity_sweep_agent import LiquiditySweepAgent
 from ai_trader.agents.llm_validator_agent import LlmValidatorAgent
 from ai_trader.agents.news_agent import NewsAgent
+from ai_trader.config.settings import settings
 from ai_trader.data.market_data_context import MarketDataContext, MarketDataQuality
 from ai_trader.data.nse_option_chain import OptionChainSummary
 
@@ -121,6 +122,7 @@ def test_llm_validator_uses_openai_structured_response():
 
     validator = LlmValidatorAgent(
         validation_enabled=True,
+        provider="openai",
         api_key="test-key",
         client=DummyClient(),
     )
@@ -153,6 +155,7 @@ def test_llm_validator_falls_back_to_deterministic_logic_on_api_failure():
 
     validator = LlmValidatorAgent(
         validation_enabled=True,
+        provider="openai",
         api_key="test-key",
         client=FailingClient(),
     )
@@ -177,6 +180,75 @@ def test_llm_validator_disabled_uses_deterministic_signal():
     result = validator.validate({"signal": "BUY_PE"})
     assert result.validation == "approved"
     assert result.source == "deterministic_fallback"
+
+
+def test_llm_validator_uses_gemini_structured_response():
+    class DummyGeminiResponse:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": '{"validation":"approved","confidence_adjustment":0.05,"reasoning":"Institutional alignment confirmed."}'
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+
+    class DummyGeminiClient:
+        @staticmethod
+        def post(url, json=None, timeout=8.0):
+            return DummyGeminiResponse()
+
+    validator = LlmValidatorAgent(
+        validation_enabled=True,
+        provider="gemini",
+        api_key="gemini-key",
+        client=DummyGeminiClient(),
+    )
+    result = validator.validate({"signal": "BUY_CE", "decision_score": 8})
+    assert result.validation == "approved"
+    assert result.source == "gemini"
+
+
+def test_llm_validator_uses_provider_default_model_when_config_default_is_for_other_provider(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class DummyResponse:
+        output_text = '{"validation":"approved","confidence_adjustment":0.01,"reasoning":"Validated."}'
+
+    class DummyClient:
+        class Chat:
+            class Completions:
+                @staticmethod
+                def create(**kwargs):
+                    captured["model"] = kwargs["model"]
+                    return DummyResponse()
+
+            completions = Completions()
+
+        chat = Chat()
+
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "llm_model", "gemini-2.0-flash")
+    validator = LlmValidatorAgent(
+        validation_enabled=True,
+        provider="openai",
+        api_key="test-key",
+        client=DummyClient(),
+    )
+    result = validator.validate({"signal": "BUY_CE", "decision_score": 8})
+    assert result.source == "openai"
+    assert captured["model"] == "gpt-4.1-mini"
 
 
 def test_news_agent_marks_missing_articles_as_unavailable():

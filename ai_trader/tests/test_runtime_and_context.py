@@ -200,8 +200,7 @@ def test_main_runtime_helpers(monkeypatch, tmp_path):
     monkeypatch.setattr(main_module.engine, "run_once", lambda open_trades=0: output)
     monkeypatch.setattr(main_module.journal, "get_open_trades", lambda: [])
     monkeypatch.setattr(main_module.journal, "record_signal", lambda **kwargs: 101)
-    monkeypatch.setattr(main_module.engine.risk_agent, "record_signal_emitted", lambda emitted_at=None: None)
-    monkeypatch.setattr(main_module.engine.risk_agent, "record_trade_open_today", lambda: None)
+    monkeypatch.setattr(main_module.engine.risk_agent, "authorize_signal", lambda *args, **kwargs: RiskCheckResult(True, None))
     monkeypatch.setattr(
         main_module.alerter,
         "send_trade_signal",
@@ -214,7 +213,16 @@ def test_main_runtime_helpers(monkeypatch, tmp_path):
     monkeypatch.setattr(
         main_module.position_monitor,
         "monitor_once",
-        lambda: [type("Exit", (), {"message": "exit now"})()],
+        lambda: [
+            PositionMonitorResult(
+                signal_id=1,
+                status="target_hit",
+                current_price=120.0,
+                pnl=20.0,
+                message="exit now",
+                advisory_only=False,
+            )
+        ],
     )
     monkeypatch.setattr(
         main_module.alerter,
@@ -528,6 +536,7 @@ def test_startup_preflight_persists_runtime_health(monkeypatch, tmp_path):
     monkeypatch.setattr(main_module, "_runtime_health_path", runtime_health_path)
     monkeypatch.setattr(main_module, "_live_state_path", live_state_path)
     monkeypatch.setattr(main_module.settings, "llm_validation_enabled", True)
+    monkeypatch.setattr(main_module.settings, "llm_provider", "openai")
     monkeypatch.setattr(main_module.settings, "openai_api_key", None)
     monkeypatch.setattr(main_module.settings, "strict_startup_checks", False)
 

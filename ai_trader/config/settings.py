@@ -32,13 +32,26 @@ class Settings(BaseSettings):
     kite_api_key: Optional[str] = Field(default=None, repr=False)
     kite_api_secret: Optional[str] = Field(default=None, repr=False)
     kite_access_token: Optional[str] = Field(default=None, repr=False)
+    kite_last_login: Optional[str] = None
+    kite_redirect_url: str = "http://localhost:8000/callback"
+    kite_auth_timeout_seconds: int = 300
     kite_instrument_token: Optional[int] = None
 
     news_api_key: Optional[str] = Field(default=None, repr=False)
+    newsdata_api_key: Optional[str] = Field(default=None, repr=False)
+    marketaux_api_key: Optional[str] = Field(default=None, repr=False)
+    financial_modeling_prep_api_key: Optional[str] = Field(default=None, repr=False)
+    alpha_vantage_api_key: Optional[str] = Field(default=None, repr=False)
+    tradingeconomics_api_key: Optional[str] = Field(default=None, repr=False)
     openai_api_key: Optional[str] = Field(default=None, repr=False)
-    llm_model: str = "gpt-4.1-mini"
+    gemini_api_key: Optional[str] = Field(default=None, repr=False)
+    llm_provider: str = "gemini"
+    llm_model: str = "gemini-2.0-flash"
     llm_validation_enabled: bool = False
     market_data_cache_seconds: int = 20
+    news_feed_cache_seconds: int = 120
+    global_market_cache_seconds: int = 120
+    macro_calendar_cache_seconds: int = 300
     max_price_candle_age_seconds: int = 900
     max_option_chain_age_seconds: int = 180
     max_vix_age_seconds: int = 300
@@ -48,6 +61,8 @@ class Settings(BaseSettings):
     twilio_auth_token: Optional[str] = Field(default=None, repr=False)
     twilio_whatsapp_from: Optional[str] = Field(default=None, repr=False)
     whatsapp_to: Optional[str] = Field(default=None, repr=False)
+    twilio_content_sid: Optional[str] = Field(default=None, repr=False)
+    twilio_trade_content_sid: Optional[str] = Field(default=None, repr=False)
 
     # Backtesting
     backtest_data_path: str = "ai_trader/tests/mock_data/nifty_intraday.csv"
@@ -56,6 +71,28 @@ class Settings(BaseSettings):
     runtime_health_path: str = "ai_trader/data/runtime_health.json"
     replay_reports_path: str = "ai_trader/data/replay_reports"
     strict_startup_checks: bool = False
+
+    # Execution intelligence and position awareness feature flags
+    execution_intelligence_enabled: bool = False
+    exit_intelligence_enabled: bool = False
+    data_quality_guard_enabled: bool = False
+    position_tracker_enabled: bool = False
+    kill_switch_enabled: bool = False
+
+    # Execution intelligence tuning
+    consolidation_lookback_candles: int = 12
+    consolidation_range_threshold_pct: float = 0.35
+    extension_ema_period: int = 20
+    extension_threshold_pct: float = 0.8
+
+    # Exit intelligence tuning
+    exit_intel_window_points: int = 6
+    exit_intel_stagnation_threshold_pct: float = 4.0
+    exit_intel_momentum_lookback: int = 3
+    exit_intel_advisory_cooldown_seconds: int = 300
+
+    # Kill switch tuning
+    kill_switch_consecutive_losses: int = 2
 
     model_config = SettingsConfigDict(
         env_prefix="",

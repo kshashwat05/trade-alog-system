@@ -6,6 +6,7 @@ from typing import Any, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+import requests
 
 try:
     from openai import OpenAI
@@ -15,6 +16,7 @@ except Exception:  # noqa: BLE001
 from ai_trader.config.settings import settings
 
 ValidationDecision = Literal["approved", "rejected"]
+LlmProvider = Literal["openai", "gemini"]
 
 
 @dataclass
@@ -35,6 +37,10 @@ class _LlmStructuredResponse(BaseModel):
 
 
 class LlmValidatorAgent:
+    DEFAULT_MODELS: dict[LlmProvider, str] = {
+        "openai": "gpt-4.1-mini",
+        "gemini": "gemini-2.0-flash",
+    }
     RESPONSE_SCHEMA: dict[str, Any] = {
         "name": "llm_signal_validation",
         "schema": {
@@ -64,21 +70,34 @@ class LlmValidatorAgent:
     def __init__(
         self,
         *,
+        provider: Optional[str] = None,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         validation_enabled: Optional[bool] = None,
         client: Any | None = None,
         timeout_seconds: float = 8.0,
     ) -> None:
-        self.api_key = api_key or settings.openai_api_key
-        self.model = model or settings.llm_model
+        self.provider: LlmProvider = ("openai" if (provider or settings.llm_provider).lower() == "openai" else "gemini")
+        default_api_key = settings.openai_api_key if self.provider == "openai" else settings.gemini_api_key
+        self.api_key = api_key or default_api_key
+        configured_model = settings.llm_model
+        provider_default = self.DEFAULT_MODELS[self.provider]
+        if model is not None:
+            self.model = model
+        elif configured_model and settings.llm_provider.lower() == self.provider:
+            self.model = configured_model
+        else:
+            self.model = provider_default
         self.validation_enabled = (
             settings.llm_validation_enabled if validation_enabled is None else validation_enabled
         )
         self.timeout_seconds = timeout_seconds
         self.client = client
-        if self.client is None and self.validation_enabled and self.api_key and OpenAI is not None:
-            self.client = OpenAI(api_key=self.api_key, timeout=timeout_seconds)
+        if self.client is None and self.validation_enabled and self.api_key:
+            if self.provider == "openai" and OpenAI is not None:
+                self.client = OpenAI(api_key=self.api_key, timeout=timeout_seconds)
+            elif self.provider == "gemini":
+                self.client = requests.Session()
 
     @staticmethod
     def _deterministic_passthrough(reason: str, *, fallback_used: bool = False) -> LlmValidationResult:
@@ -104,13 +123,13 @@ class LlmValidatorAgent:
         raise ValueError("LLM response did not include structured text content.")
 
     @classmethod
-    def _normalize_model_response(cls, raw_text: str) -> LlmValidationResult:
+    def _normalize_model_response(cls, raw_text: str, *, source: str) -> LlmValidationResult:
         parsed = _LlmStructuredResponse.model_validate_json(raw_text)
         return LlmValidationResult(
             validation=parsed.validation,
             confidence_adjustment=float(parsed.confidence_adjustment),
             reasoning=parsed.reasoning.strip(),
-            source="openai",
+            source=source,
             fallback_used=False,
         )
 
@@ -142,7 +161,47 @@ class LlmValidatorAgent:
             ],
         )
         raw_text = self._extract_response_text(response)
-        return self._normalize_model_response(raw_text)
+        return self._normalize_model_response(raw_text, source="openai")
+
+    @staticmethod
+    def _extract_gemini_text(response_payload: dict[str, Any]) -> str:
+        candidates = response_payload.get("candidates", [])
+        if not candidates:
+            raise ValueError("Gemini response did not include candidates.")
+        content = candidates[0].get("content", {})
+        parts = content.get("parts", [])
+        if not parts:
+            raise ValueError("Gemini response did not include text parts.")
+        text = parts[0].get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("Gemini response did not include text output.")
+        return text
+
+    def _call_gemini(self, payload: dict[str, Any]) -> LlmValidationResult:
+        if self.api_key is None:
+            raise RuntimeError("Gemini API key is not configured.")
+        if self.client is None:
+            raise RuntimeError("Gemini HTTP client is not configured.")
+        prompt = (
+            f"{self._build_instructions()}\n\n"
+            "Return only JSON with keys validation, confidence_adjustment, reasoning.\n\n"
+            f"Payload:\n{json.dumps(payload, default=str)}"
+        )
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        response = self.client.post(
+            url,
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.0,
+                    "responseMimeType": "application/json",
+                },
+            },
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        raw_text = self._extract_gemini_text(response.json())
+        return self._normalize_model_response(raw_text, source="gemini")
 
     def validate(self, payload: dict) -> LlmValidationResult:
         signal = payload.get("signal")
@@ -165,23 +224,26 @@ class LlmValidatorAgent:
 
         if not self.api_key or self.client is None:
             result = self._deterministic_passthrough(
-                "LLM client unavailable; using deterministic signal.",
+                f"{self.provider.title()} LLM client unavailable; using deterministic signal.",
                 fallback_used=True,
             )
             logger.warning(f"LlmValidatorAgent validation fallback: {result}")
             return result
 
         try:
-            result = self._call_openai(payload)
+            if self.provider == "openai":
+                result = self._call_openai(payload)
+            else:
+                result = self._call_gemini(payload)
         except (ValidationError, ValueError, TypeError, RuntimeError) as exc:
             result = self._deterministic_passthrough(
-                f"LLM response invalid; using deterministic signal. {exc}",
+                f"{self.provider.title()} LLM response invalid; using deterministic signal. {exc}",
                 fallback_used=True,
             )
             logger.error(f"LlmValidatorAgent invalid response fallback: {exc}")
         except Exception as exc:  # noqa: BLE001
             result = self._deterministic_passthrough(
-                f"LLM unavailable; using deterministic signal. {exc}",
+                f"{self.provider.title()} LLM unavailable; using deterministic signal. {exc}",
                 fallback_used=True,
             )
             logger.error(f"LlmValidatorAgent API failure fallback: {exc}")

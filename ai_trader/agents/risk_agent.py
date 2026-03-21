@@ -58,6 +58,8 @@ class RiskManagerAgent:
         liquidity: str,
         volatility: str,
         news_risk: str,
+        macro_event_risk: str,
+        global_risk_sentiment: str,
         reserve: bool,
     ) -> RiskCheckResult:
         today = self._get_today()
@@ -98,6 +100,12 @@ class RiskManagerAgent:
 
         if news_risk == "high":
             return RiskCheckResult(allowed=False, reason="News risk too high.")
+
+        if macro_event_risk == "high":
+            return RiskCheckResult(allowed=False, reason="Macro event risk too high.")
+
+        if global_risk_sentiment == "risk_off":
+            return RiskCheckResult(allowed=False, reason="Global risk sentiment is too negative.")
 
         if last_signal_at is not None:
             cooldown = timedelta(minutes=settings.signal_cooldown_minutes)
@@ -140,6 +148,8 @@ class RiskManagerAgent:
         liquidity: str = "medium",
         volatility: str = "medium",
         news_risk: str = "medium",
+        macro_event_risk: str = "low",
+        global_risk_sentiment: str = "neutral",
     ) -> RiskCheckResult:
         with self._lock:
             return self._evaluate_locked(
@@ -149,6 +159,8 @@ class RiskManagerAgent:
                 liquidity=liquidity,
                 volatility=volatility,
                 news_risk=news_risk,
+                macro_event_risk=macro_event_risk,
+                global_risk_sentiment=global_risk_sentiment,
                 reserve=False,
             )
 
@@ -161,6 +173,8 @@ class RiskManagerAgent:
         liquidity: str = "medium",
         volatility: str = "medium",
         news_risk: str = "medium",
+        macro_event_risk: str = "low",
+        global_risk_sentiment: str = "neutral",
     ) -> RiskCheckResult:
         with self._lock:
             return self._evaluate_locked(
@@ -170,5 +184,7 @@ class RiskManagerAgent:
                 liquidity=liquidity,
                 volatility=volatility,
                 news_risk=news_risk,
+                macro_event_risk=macro_event_risk,
+                global_risk_sentiment=global_risk_sentiment,
                 reserve=True,
             )

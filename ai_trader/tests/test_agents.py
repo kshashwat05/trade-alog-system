@@ -15,8 +15,11 @@ from ai_trader.agents.liquidity_agent import LiquidityAgent, LiquidityAnalysis
 from ai_trader.agents.trigger_agent import TradeTriggerAgent, TradeSignal
 from ai_trader.agents.fii_positioning_agent import FiiPositioningAnalysis
 from ai_trader.agents.gamma_agent import GammaAnalysis
+from ai_trader.agents.global_market_agent import GlobalMarketAnalysis
 from ai_trader.agents.liquidity_sweep_agent import LiquiditySweepAnalysis
+from ai_trader.agents.macro_calendar_agent import MacroCalendarAnalysis
 from ai_trader.agents.risk_agent import RiskManagerAgent, RiskCheckResult
+from ai_trader.analysis.global_sentiment_engine import GlobalSentimentAnalysis
 from ai_trader.data.market_data_context import MarketDataQuality
 from ai_trader.orchestrator.decision_engine import DecisionEngine, OrchestratorOutput
 from ai_trader.main import is_market_open
@@ -57,7 +60,11 @@ def test_option_chain_agent_works_with_empty_data(monkeypatch):
 
 
 def test_news_agent_neutral_without_key(monkeypatch):
-    agent = NewsAgent(api_key=None)
+    class DummySession:
+        def get(self, url, params=None, timeout=5):
+            raise RuntimeError("offline")
+
+    agent = NewsAgent(api_key=None, session=DummySession())  # type: ignore[arg-type]
     res = agent.analyze()
     assert isinstance(res, NewsMacroAnalysis)
     assert res.macro_bias in ("bullish", "bearish", "neutral")
@@ -116,6 +123,26 @@ def test_trigger_and_risk_and_orchestrator_integration():
         event_type="none",
         confidence=0.8,
     )
+    global_market = GlobalMarketAnalysis(
+        global_bias="bearish",
+        risk_sentiment="neutral",
+        confidence=0.7,
+        data_available=True,
+        fallback_used=False,
+    )
+    macro_calendar = MacroCalendarAnalysis(
+        event_risk="low",
+        event_type="none",
+        expected_market_impact="neutral",
+        data_available=True,
+        fallback_used=False,
+    )
+    global_sentiment = GlobalSentimentAnalysis(
+        market_sentiment="bearish",
+        confidence=0.75,
+        risk_blocked=False,
+        rationale="global backdrop supports bearish setup",
+    )
 
     trigger = TradeTriggerAgent()
     signal = trigger.generate_signal(
@@ -128,6 +155,9 @@ def test_trigger_and_risk_and_orchestrator_integration():
         fii=fii,
         gamma=gamma,
         liquidity_sweep=liquidity_sweep,
+        global_market=global_market,
+        macro_calendar=macro_calendar,
+        global_sentiment=global_sentiment,
         spot=24000,
         market_context=type(
             "Ctx",
@@ -197,6 +227,8 @@ def test_trigger_and_risk_and_orchestrator_integration():
     engine.fii_agent.analyze = lambda context: fii  # type: ignore[method-assign]
     engine.gamma_agent.analyze = lambda context: gamma  # type: ignore[method-assign]
     engine.liquidity_sweep_agent.analyze = lambda context: liquidity_sweep  # type: ignore[method-assign]
+    engine.global_market_agent.analyze = lambda: global_market  # type: ignore[method-assign]
+    engine.macro_calendar_agent.analyze = lambda: macro_calendar  # type: ignore[method-assign]
     out = engine.run_once()
     assert isinstance(out, OrchestratorOutput)
     assert isinstance(out.decision_score, int)
