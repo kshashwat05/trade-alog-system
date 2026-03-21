@@ -443,6 +443,8 @@ def run_position_monitor_cycle() -> None:
         try:
             alerter.send_exit_alert(exit_result.message)
             if exit_result.advisory_only:
+                if exit_result.exit_suggestion is not None:
+                    exit_intelligence.mark_advisory_sent(exit_result.signal_id, exit_result.exit_suggestion)
                 journal.merge_metadata(
                     exit_result.signal_id,
                     {

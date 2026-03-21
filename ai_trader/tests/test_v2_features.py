@@ -425,6 +425,7 @@ def test_main_price_fetcher_skips_without_instrument_key():
         trade_executed=True,
         execution_price=101.0,
         exit_price=None,
+        closed_at=None,
         pnl=None,
         quantity=1,
         status="executed",

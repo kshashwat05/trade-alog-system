@@ -20,12 +20,16 @@ class KillSwitchAgent:
     """Blocks new trades after consecutive realized losses."""
 
     @staticmethod
+    def _realized_at(entry: TradeJournalEntry) -> datetime:
+        return datetime.fromisoformat(entry.closed_at or entry.timestamp)
+
+    @staticmethod
     def _closed_realized_trades(entries: list[TradeJournalEntry]) -> list[TradeJournalEntry]:
         closed = [entry for entry in entries if entry.trade_executed and entry.pnl is not None and entry.status != "executed"]
         if not closed:
             return []
-        latest_day = datetime.fromisoformat(closed[-1].timestamp).date()
-        return [entry for entry in closed if datetime.fromisoformat(entry.timestamp).date() == latest_day]
+        latest_day = KillSwitchAgent._realized_at(closed[-1]).date()
+        return [entry for entry in closed if KillSwitchAgent._realized_at(entry).date() == latest_day]
 
     def evaluate(self, journal: TradeJournal) -> KillSwitchDecision:
         closed = self._closed_realized_trades(journal.get_all_trades())

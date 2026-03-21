@@ -26,6 +26,7 @@ def _build_trade_entry(*, trade_id: int = 1) -> TradeJournalEntry:
         trade_executed=True,
         execution_price=100.0,
         exit_price=None,
+        closed_at=None,
         pnl=None,
         quantity=1,
         status="executed",
@@ -72,6 +73,7 @@ def test_exit_intelligence_deduplicates_repeated_advisories():
     for _ in range(5):
         agent.observe_trade(trade, 100.0)
     first = agent.observe_trade(trade, 100.0)
+    agent.mark_advisory_sent(trade.id, first)
     second = agent.observe_trade(trade, 100.0)
 
     assert first.action == "PARTIAL_EXIT"
@@ -127,6 +129,7 @@ def test_kill_switch_counts_consecutive_losses_only_for_latest_trading_day(tmp_p
     )
     journal.record_execution(first, execution_price=100.0, quantity=1, instrument_key="NFO:NIFTY24MAR24000CE")
     journal.close_trade(first, status="stop_loss_hit", exit_price=90.0, pnl=-10.0)
+    journal._conn.execute("UPDATE trades SET closed_at = ? WHERE id = ?", ("2026-03-12T15:25:00", first))
 
     second = journal.record_signal(
         timestamp=today,
@@ -140,10 +143,56 @@ def test_kill_switch_counts_consecutive_losses_only_for_latest_trading_day(tmp_p
     )
     journal.record_execution(second, execution_price=100.0, quantity=1, instrument_key="NFO:NIFTY24MAR24000CE")
     journal.close_trade(second, status="stop_loss_hit", exit_price=90.0, pnl=-10.0)
+    journal._conn.execute("UPDATE trades SET closed_at = ? WHERE id = ?", ("2026-03-13T09:25:00", second))
+    journal._conn.commit()
 
     decision = KillSwitchAgent().evaluate(journal)
     assert decision.blocked is False
     assert decision.consecutive_losses == 1
+
+
+def test_kill_switch_uses_realized_close_day_for_overnight_losses(tmp_path, monkeypatch):
+    from ai_trader.config.settings import settings
+
+    monkeypatch.setattr(settings, "kill_switch_consecutive_losses", 2)
+    journal = TradeJournal(tmp_path / "trade_journal.db")
+
+    first = journal.record_signal(
+        timestamp=datetime(2026, 3, 12, 15, 20),
+        signal_type="BUY_CE",
+        entry_price=100.0,
+        stop_loss=90.0,
+        target=120.0,
+        confidence=0.8,
+        decision_score=6,
+        rationale="overnight loss 1",
+    )
+    journal.record_execution(first, execution_price=100.0, quantity=1, instrument_key="NFO:NIFTY24MAR24000CE")
+    journal.close_trade(first, status="stop_loss_hit", exit_price=90.0, pnl=-10.0)
+    journal._conn.execute("UPDATE trades SET closed_at = ? WHERE id = ?", ("2026-03-13T09:10:00", first))
+
+    second = journal.record_signal(
+        timestamp=datetime(2026, 3, 13, 9, 20),
+        signal_type="BUY_CE",
+        entry_price=100.0,
+        stop_loss=90.0,
+        target=120.0,
+        confidence=0.8,
+        decision_score=6,
+        rationale="same-day loss 2",
+    )
+    journal.record_execution(second, execution_price=100.0, quantity=1, instrument_key="NFO:NIFTY24MAR24000CE")
+    journal.close_trade(second, status="stop_loss_hit", exit_price=90.0, pnl=-10.0)
+    journal._conn.execute("UPDATE trades SET closed_at = ? WHERE id = ?", ("2026-03-13T09:30:00", second))
+    journal._conn.commit()
+
+    trade = journal.get_trade(first)
+    assert trade is not None
+    assert trade.closed_at is not None
+
+    decision = KillSwitchAgent().evaluate(journal)
+    assert decision.blocked is True
+    assert decision.consecutive_losses == 2
 
 
 def test_position_tracker_scans_all_executed_trades_not_only_open(tmp_path):

@@ -15,6 +15,7 @@ class ExitIntelligenceSuggestion:
     action: str
     reason: str
     confidence: float
+    dedupe_key: str = ""
 
 
 class ExitIntelligenceAgent:
@@ -31,15 +32,23 @@ class ExitIntelligenceAgent:
         self._last_advisories.pop(trade_id, None)
 
     def _should_emit(self, trade_id: int, suggestion: ExitIntelligenceSuggestion) -> bool:
-        now = time.monotonic()
         previous = self._last_advisories.get(trade_id)
         cooldown = max(0, settings.exit_intel_advisory_cooldown_seconds)
         if previous is not None:
-            prev_action, prev_reason, prev_at = previous
-            if prev_action == suggestion.action and prev_reason == suggestion.reason and (now - prev_at) < cooldown:
+            prev_action, prev_key, prev_at = previous
+            suggestion_key = suggestion.dedupe_key or suggestion.action
+            if prev_action == suggestion.action and prev_key == suggestion_key and (time.monotonic() - prev_at) < cooldown:
                 return False
-        self._last_advisories[trade_id] = (suggestion.action, suggestion.reason, now)
         return True
+
+    def mark_advisory_sent(self, trade_id: int, suggestion: ExitIntelligenceSuggestion) -> None:
+        if suggestion.action == "NONE":
+            return
+        self._last_advisories[trade_id] = (
+            suggestion.action,
+            suggestion.dedupe_key or suggestion.action,
+            time.monotonic(),
+        )
 
     def observe_trade(
         self,
@@ -69,6 +78,7 @@ class ExitIntelligenceAgent:
                 action="PARTIAL_EXIT",
                 reason=f"Premium stagnating near entry ({pnl_pct:.2f}%).",
                 confidence=0.65,
+                dedupe_key="stagnation_near_entry",
             )
             if self._should_emit(trade.id, suggestion):
                 logger.info(f"ExitIntelligence suggestion trade_id={trade.id}: {suggestion}")
@@ -79,6 +89,7 @@ class ExitIntelligenceAgent:
                 action="TRAILING_STOP",
                 reason="Momentum slowdown detected after favorable move.",
                 confidence=0.7,
+                dedupe_key="momentum_slowdown",
             )
             if self._should_emit(trade.id, suggestion):
                 logger.info(f"ExitIntelligence suggestion trade_id={trade.id}: {suggestion}")
